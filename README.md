@@ -1,2 +1,2 @@
 # suicideCrypt
-A tool for creating cryptographically strong drives that destroy themselves upon tampering or issued command
+A tool for creating cryptographically strong volumes that destroy themselves upon tampering or issued command
