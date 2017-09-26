@@ -24,7 +24,7 @@ suicideCrypt acheives the goal of strong cryptographic volumes that become unrec
 
 Then based on these, trigger destruction of suicideCrypt create drives on the local host. 
 
-suicideCrypt volumes are created using the [Linux LUKS/dm-crypt modules](https://wiki.archlinux.org/index.php/Dm-crypt/Device_encryption) so that the key to decrypt the volume is not chosen by the admin of the system. suicideCrypt can create these volumes in one of two ways:
+suicideCrypt volumes are created using the [Linux LUKS/dm-crypt modules](https://wiki.archlinux.org/index.php/Dm-crypt/Device_encryption) such that the key to decrypt the volume is not chosen or known by the admin of the system. suicideCrypt can create these volumes in one of two ways:
 
 * Normal Mode: This volume can be unmounted and remounted as long as the server remains powered on, or the disk is undestroyed. There is also provision to copy the header and key to external or removable media so the drive can be recovered by the admin after a reboot. This highly limits resistence to "ruber hose" decryption.
 * Paranoid Mode: In this mode the key and header used to encrypt the volume are deleted immediatly upon volume creation and mount. In this manner the drive is, auditably, fully unrecoverable in the event of unmount or power loss even to the creator of the drive. 
