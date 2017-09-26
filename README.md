@@ -20,7 +20,8 @@ suicideCrypt acheives the goal of strong cryptographic volumes that become unrec
   * remote destroy triggers 
   * hardware loggers
   * hardware imagers
-  other configurable events and then trigger destruction of suicideCrypt create drives on the local host. 
+  * other configurable events 
+Then based on these, trigger destruction of suicideCrypt create drives on the local host. 
 
 suicideCrypt volumes are created using the [Linux LUKS/dm-crypt modules](https://wiki.archlinux.org/index.php/Dm-crypt/Device_encryption) so that the key to decrypt the volume is not chosen by the admin of the system. suicideCrypt can create these volumes in one of two ways:
 
