@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 
-# suicideCrypt.pl : Creates plausibly intrustion and theft proof encrypted volumes.
+# suicideCrypt.pl : Creates plausibly intrusion and theft proof encrypted volumes.
 # Author          : Sebastian Kai Frost
 # Created On      : Monday 25th September 2017
 # Status          : Released
