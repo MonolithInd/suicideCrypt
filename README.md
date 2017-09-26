@@ -10,17 +10,17 @@ As a side goal I wanted to see if I could plausibly solve the ["rubber hose"](ht
 
 In short, could I create a volume with an audit trail that proves to a reasonable level that the owner of the volume is personally unable to decrypt the volume once it is unmounted, tampered with or powered down. Turns out, yes.
 
-#How?
+# How?
 suicideCrypt acheives the goal of strong cryptographic volumes that become unrecoverable upon tampering, even for the creator of the volume using 2 software components. 
 
 * suicideCrypt.pl : A tool for creating and destroying strong cryptographic volumes in such a manner that the creator, via audit trail, can claim zero ability to recover a destroyed cryptiographic volume. 
 
-* suicideCryptd : A daemon that can be configured to monitor for various system events such as 
+* suicideCryptd : A daemon that can be configured to monitor for various system events such as:
   * unauthorised logins 
   * remote destroy triggers 
   * hardware loggers
   * hardware imagers
-  and other configurable events and then trigger destruction of suicideCrypt create drives on the local host. 
+  other configurable events and then trigger destruction of suicideCrypt create drives on the local host. 
 
 suicideCrypt volumes are created using the [Linux LUKS/dm-crypt modules](https://wiki.archlinux.org/index.php/Dm-crypt/Device_encryption) so that the key to decrypt the volume is not chosen by the admin of the system. suicideCrypt can create these volumes in one of two ways:
 
