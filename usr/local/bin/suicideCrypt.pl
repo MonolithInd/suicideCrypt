@@ -10,12 +10,14 @@
 use strict;
 use warnings;
 use Getopt::Long qw(:config no_ignore_case);
+use Sys::Hostname;
 
 ### Editable Globals ###
 
 my $DEBUG = 0;
 my $VERBOSE = 0;
-my $VERSION = "0.1";
+my $VERSION = "0.5";
+my $HOST = hostname();
 my $RAMDISK = "/tmp/suicideCryptRAMdisk";
 my $LOGFILE = "/var/log/suicideCrypt.log";
 my $LOG;
@@ -711,7 +713,7 @@ sub printLC {
   if ($show) {
     print "$msg";
   }
-  print $LOG "$timestamp : $logmsg";
+  print $LOG "$timestamp : - $HOST - $logmsg";
 
 }
 
