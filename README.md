@@ -34,7 +34,7 @@ A full description of the LUKS/dm-crypt kenrnel module and how it works is beyon
 suicideCrypt creates volumes where:
 
 * The header component is physically seperated from the drive it unlocks.
-* A randomly genrated 4096 bit keyfile is randomly generated to lock/unlock the encryption key/header. 
+* A fully random (for given values of random) 4096 bit keyfile is generated to lock/unlock the encryption key/header. 
 * Both the header and random keyfile are stored on a temporary ramdisk in memory such that neither, in correct operation, are ever written to any kind of magnetic or SSD type meida. 
 
 By simply zeroing and unmounting the tmpfs ramdisk the ability to lock and unlock the encrypted volume are lost forever. suicideCrypt automates this process and makes it a simple single line command to create or destroy such volumes as well as mananging the tmpfs ramdisk required. 
