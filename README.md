@@ -1,5 +1,5 @@
 # suicideCrypt
-A tool for creating cryptographically strong volumes that destroy themselves upon tampering or via issued command. Included is a daeomon designed to react to system events and on a configurable basis, destroy data volumes encrypted using the suicideCrypt tool. This process is fast and, if used correctly, both unrecoverable by an adversery and auditably unrecoverable by the volume owner. 
+A tool for creating cryptographically strong volumes that destroy themselves upon tampering or via issued command. Included is a daemon designed to react to system events and on a configurable basis, destroy data volumes encrypted using the suicideCrypt tool. This process is fast and, if used correctly, both unrecoverable by an adversery and auditably unrecoverable by the volume owner. 
 
 # Why suicideCrypt?
 While looking at the options for self destroying encrypted data volumes it seemed that most of the work in the space involves customr hard drives with hardware AES chips that self destruct based on a variety of triggers (hard drive removal, SMS, email, physical button etc) but almost universally these drives are epensive and, once triggered, unusable and have to be replaced at great cost. 
