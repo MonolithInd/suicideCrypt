@@ -31,6 +31,12 @@ suicideCrypt volumes are created using the [Linux LUKS/dm-crypt modules](https:/
 
 A full description of the LUKS/dm-crypt kenrnel module and how it works is beyond the scope of this readme. But simplified, the LUKS module uses a header attached to an encrypted device to store the cryptographic decryption key, and has a number of slots (8) to store keys that can be used to unlock the decryption key. In normal operation this header is prepended onto the start of the encrypted device/container and a passphrase or keyfile are used to lock/unlock the decrpytion key and mount the volume. 
 
-suicideCrypt creates volumes where the header component is physically seperated from the drive it unlocks. And a randomly genrated 4096 bit keyfile is randomly generated to lock/unlock the encryption key/header. Both the header and random keyfile are stored on a temporary ramdisk in memory such that neither, in correct operation, are even written to any kind of magnetic or ssd type meida. By simply zeroing and unmounting the tmpfs ramdisk the ability to lock and unlock the encrypted volume are lost forever. suicideCrypt automates this process and makes it a simple single line command to create or destroy such volumes as well as mananging the tmpfs ramdisk required. 
+suicideCrypt creates volumes where:
 
-In this manner, rapid and total destruction of the data volume is acheivable in seconds without requiring zeroing a large device. Furthermore all actions performed are logged in a full audit log, showing that at no point did a typical operator have access to the cryptographic keys needed to lock/unlock the drive. The destruction of the header and keyfile, followed by an unmount is the software equivilent of destruction of the AES key in a hardware encryption drive. 
+* The header component is physically seperated from the drive it unlocks.
+* A randomly genrated 4096 bit keyfile is randomly generated to lock/unlock the encryption key/header. 
+* Both the header and random keyfile are stored on a temporary ramdisk in memory such that neither, in correct operation, are ever written to any kind of magnetic or SSD type meida. 
+
+By simply zeroing and unmounting the tmpfs ramdisk the ability to lock and unlock the encrypted volume are lost forever. suicideCrypt automates this process and makes it a simple single line command to create or destroy such volumes as well as mananging the tmpfs ramdisk required. 
+
+In this manner, rapid and total destruction of the data volume is acheivable in seconds without requiring zeroing a large device. Furthermore all actions performed are logged in a full on disk audit log, showing that at no point did a typical operator have access to the cryptographic keys needed to lock/unlock the drive. The destruction of the header and keyfile, followed by an unmount is the software equivilent of destruction of the AES key in a hardware encryption drive. 
