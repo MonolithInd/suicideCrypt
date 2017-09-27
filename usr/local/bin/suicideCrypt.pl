@@ -36,11 +36,29 @@ if (defined $CMDOPTIONS{v}) {
 if (defined $CMDOPTIONS{h}) {
   printHelp();
   exit(1);
-} elsif (defined $CMDOPTIONS{c}) {
+} elsif (defined $CMDOPTIONS{n}) {
   logStart("Create");
-  create();
+  new();
   logClose();
   exit(1);
+} elsif (defined $CMDOPTIONS{b}) {
+  logStart("Create");
+  if (newBlock()) {
+    logClose();
+    exit(1);
+  } else {
+    printLC("-> New suicideCrypt block device creation failed!\n");
+    exit(0);
+  }
+} elsif (defined $CMDOPTIONS{c}) {
+    logStart("Create");
+  if (newContainer()) {
+    logClose();
+    exit(1);
+  } else {
+    printLC("-> New suicideCrypt ontainer creation failed!\n");
+    exit(0);
+  }
 } elsif (defined $CMDOPTIONS{l}) {
   listsuicideCryptVol();
   exit (1);
@@ -65,7 +83,7 @@ sub logStart {
   my $msg = shift;
 
   open($LOG, '>>', $LOGFILE) or die "Could not open logfile '$LOGFILE' $!";
-  $msg = "\n -> Opening Log file to begin a " . "$msg" . " event\n";
+  $msg = "\n-> Opening Log file to begin a " . "$msg" . " event\n";
   printLC($msg, $VERBOSE);
 }
 
@@ -81,7 +99,11 @@ sub logClose {
 sub parseOptions {
 
   GetOptions ( \%CMDOPTIONS,
-            "c|create",    
+            "n|new",
+            "c|container=s",
+            "b|blockdevice=s",
+            "s|size=s",
+            "m|mountpoint=s",
             "l|list",
             "v|verbose",
             "d|destroy:s",
@@ -93,7 +115,7 @@ sub parseOptions {
 }
 
 ### Create a suicideCrypt volume
-sub create {
+sub new {
 
   my %createoptions;
   my $mountpoint;
@@ -109,8 +131,8 @@ sub create {
     createHeaderFile();
     if ($createoptions{'type'} eq "c") { 
       createContainer(%createoptions); # Create an encrypted container
-    } elsif ($createoptions{'type'} eq "d") {
-      createVolume(%createoptions); # Create an encypted blcok device
+    } elsif ($createoptions{'type'} eq "b") {
+      createBlock(%createoptions); # Create an encypted blcok device
     }
     ### The core of suicideCrypt. If you select paranoid mode a key and Headr are generated
     ### for just long enought to encrypt and mount the volume then are destroyed forever. 
@@ -127,6 +149,66 @@ sub create {
     printLC("Aborting create...\n", 1);
   }
 } 
+
+sub newBlock {
+
+  my %options; 
+  $options{'type'} = "b";
+  unless (defined $CMDOPTIONS{m}) {
+    print "-b requires that -m also be set\n";
+    return(0);
+  }
+  my $mountpoint = $CMDOPTIONS{m};
+ 
+  $options{'device'} = $CMDOPTIONS{b};
+  $options{'mountpoint'} = $CMDOPTIONS{m};
+  if (defined($CMDOPTIONS{p})) {
+    $options{'paranoid'} = 1;
+  }
+  unless (defined $CMDOPTIONS{y}) {
+    printOptions(%options);
+  }
+  if (yN()) {
+    printLC("-> Creating the requested volume...\n", 1);
+    createTMPfs();
+    createKeyFile();
+    createHeaderFile();
+    createBlock(%options); # Create an encypted blcok device
+    ### The core of suicideCrypt. If you select paranoid mode a key and Headr are generated
+    ### for just long enought to encrypt and mount the volume then are destroyed forever. 
+    ### this results in a mounted drive that can never be recovered once unmounted or the 
+    ### server is rebooted. All of this is logged extensivly as a audit trail. 
+    if ($options{'paranoid'}) {
+      printLC("  -> Paranoid mode selected, deleting header and LUKS keyfile.\n", 1);
+      printLC("  -> !! After this point, volume will be unrecoverable after reboot or unmount !!\n", 1);
+      printLC("  -> Zeroing LUKS header file...\n", $VERBOSE);
+      removeHdrKey($cryptID);
+    }
+    printLC("-> Success, volume is now mounted on $mountpoint\n", 1);
+  } else {
+    printLC("Aborting create...\n", 1);
+  }
+}
+
+sub newContainer {
+  
+  my %options;
+  unless ((defined $CMDOPTIONS{s}) && (defined $CMDOPTIONS{m})) {
+   print "-c requires that -s and -m also be set\n";
+   return(0);
+  }
+  my $mountpoint = $CMDOPTIONS{m};
+ 
+  # FIXME, valid container location
+  $options{'container'} = $options{'c'};
+  ($options{'size'}, $options{'unit'}) = isValidUnit($CMDOPTIONS{s});
+  if (!$options{'size'}) {
+    print "You have specified an invalid unit for the container size!\n";
+    exit(0);
+  }
+
+
+}
 
 ### zero and delete a LUKs header and suicideCrypt keyfile. 
 sub removeHdrKey {
@@ -369,7 +451,7 @@ sub printOptions {
     print "## Type:               Container\n";
     print "## Container Location: $location\n";
     print "## Size:               $size\n";
-  } elsif ($type eq "d") {
+  } elsif ($type eq "b") {
     $device = $options{'device'};
     print "## Type:               Block Device\n";
     print "## Block Device:       $device\n";
@@ -462,7 +544,7 @@ sub createContainer {
   
 }
 
-sub createVolume {
+sub createBlock {
 
   my (%options) = @_;
   my $paranoid = $options{'paranoid'};
@@ -506,7 +588,7 @@ sub getOptions {
   if ($options{'type'} eq "c") {
     ($options{'size'}, $options{'unit'}) = getSize();
     $options{'location'} = getLocation();
-  } elsif ($options{'type'} eq "d") {
+  } elsif ($options{'type'} eq "b") {
     $options{'device'} = getDevice();
   }
   $options{'mountpoint'} = mountPoint();
@@ -526,7 +608,7 @@ sub getParanoid {
     return $paranoid;
   }
   while (!$valid) {
-    print "\nDo you want to create this suicideCrypt volume in PARANOID mode?\nEnter 'h' for info on Paranoid mode (y/n/h): ";
+    print "\nDo you want to create this suicideCrypt volume in PARANOID mode?\nEnter '?' for info on Paranoid mode (y/n/?): ";
     $selection = <STDIN>;
     chomp $selection;
     if ($selection eq "y") {
@@ -535,7 +617,7 @@ sub getParanoid {
     } elsif ($selection eq "n") {
       $paranoid = 0;
       $valid = 1;
-    } elsif ($selection eq "h") {
+    } elsif ($selection eq "?") {
       print "\n\n** Blah Blah on pranoid mode! ** \n\n";
     } else {
       print "\n!! You have entered an invalid option, please try again !!\n";
@@ -617,15 +699,27 @@ sub getSize {
     print "\nPlease enter the size of the container you wish to create in megabytes or gigabytes (e.g, 500M or 5G):";
     $selection = <STDIN>;
     chomp($selection);
-    $unit = chop($selection);
-    if (($unit eq "G") || ($unit eq "M")) {
-      $size = $selection;
+    ($size, $unit) = isValidUnit($selection);
+    if ($size) {
       $valid = 1;
     } else {
       print "Invalid unit or size, please try again\n";
     }
   }
   return($size, $unit);
+}
+
+sub isValidUnit {
+
+  my $size = shift;
+  my $unit;
+
+  $unit = chop($size);
+  if (($unit eq "G") || ($unit eq "M")) {
+    return($size, $unit);
+  } else {
+    return(0,0);
+  }
 }
 
 sub getType {
@@ -635,21 +729,19 @@ sub getType {
   my $type;
 
   while (!$valid) {
-    print "Do you wish to create an encrypted (c)ontainer file? Or an encypted physical (d)isk? (c/d): ";
+    print "Do you wish to create an encrypted (c)ontainer file? Or an encypted (b)lock device? (c/b): ";
     $selection = <STDIN>;
     chomp($selection);
     if ($selection eq "c") {
       $type = "c";
       $valid = 1;
-    } elsif ($selection eq "d") {
-      $type = "d";
+    } elsif ($selection eq "b") {
+      $type = "b";
       $valid = 1;
     }
   }
   return $type;
 }
-
-
 
 # Generates a random 16 digit string to concatonate to the name of a suicideCrypt volume to prevent collision of multiple volumes.
 sub randString {
@@ -688,7 +780,11 @@ sub printHelp {
 
   printVer();
   print "Usage:\n";
-  print "-c : create an encrypted volume\n";
+  print "-n : create an encrypted volume in interactive mode\n";
+  print "-c <path> : Create a file container encrypted volume located on <path>, requires -s, -m, and optionally -p, -y\n";
+  print "-b <block device> : Create a block device encrypted volume, requires -b, -m, and optionally -p, -y\n";
+  print "-s <numM/G> : Size of encrypted container, must be of format <size>M/G, used with -c\n";
+  print "-m <mountpoint> : Mountpoint for encrypted volume, used with -c and -b\n";
   print "-l : List all suicideCrypt created volumes\n";
   print "-d <volume, or leave blank for list> : Destroy an encrypted volume.\n";
   print "-D : Destroy all detectable suicideCrypt volumes on this host.\n";
