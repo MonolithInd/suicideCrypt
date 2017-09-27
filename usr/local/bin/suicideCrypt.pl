@@ -32,7 +32,7 @@ if (defined $CMDOPTIONS{v}) {
   $VERBOSE = 1; # set verbose 
 }
 
-# Choose what to execte.
+# Choose what to execute.
 if (defined $CMDOPTIONS{h}) {
   printHelp();
   exit(1);
@@ -43,22 +43,14 @@ if (defined $CMDOPTIONS{h}) {
   exit(1);
 } elsif (defined $CMDOPTIONS{b}) {
   logStart("Create");
-  if (newBlock()) {
-    logClose();
-    exit(1);
-  } else {
-    printLC("-> New suicideCrypt block device creation failed!\n");
-    exit(0);
-  }
+  new();
+  logClose();
+  exit(1);
 } elsif (defined $CMDOPTIONS{c}) {
-    logStart("Create");
-  if (newContainer()) {
-    logClose();
-    exit(1);
-  } else {
-    printLC("-> New suicideCrypt ontainer creation failed!\n");
-    exit(0);
-  }
+  logStart("Create");
+  new();
+  logClose();
+  exit(1);
 } elsif (defined $CMDOPTIONS{l}) {
   listsuicideCryptVol();
   exit (1);
@@ -120,7 +112,12 @@ sub new {
   my %createoptions;
   my $mountpoint;
 
-  %createoptions = getOptions(); # gather user requirements
+
+  if ($CMDOPTIONS{'c'} || $CMDOPTIONS{'b'}) {
+    %createoptions = getOptionsCL();
+  } else {
+    %createoptions = getOptions(); # gather user requirements
+  }
   $mountpoint = $createoptions{'mountpoint'};
   print "\nWe are now ready to create your encrypted volume with the following options:\n";
   printOptions(%createoptions); # show the user their choices for conformation before execution 
@@ -150,65 +147,44 @@ sub new {
   }
 } 
 
-sub newBlock {
+sub getOptionsCL {
 
-  my %options; 
-  $options{'type'} = "b";
-  unless (defined $CMDOPTIONS{m}) {
-    print "-b requires that -m also be set\n";
-    return(0);
-  }
-  my $mountpoint = $CMDOPTIONS{m};
- 
-  $options{'device'} = $CMDOPTIONS{b};
-  $options{'mountpoint'} = $CMDOPTIONS{m};
-  if (defined($CMDOPTIONS{p})) {
-    $options{'paranoid'} = 1;
-  }
-  unless (defined $CMDOPTIONS{y}) {
-    printOptions(%options);
-  }
-  if (yN()) {
-    printLC("-> Creating the requested volume...\n", 1);
-    createTMPfs();
-    createKeyFile();
-    createHeaderFile();
-    createBlock(%options); # Create an encypted blcok device
-    ### The core of suicideCrypt. If you select paranoid mode a key and Headr are generated
-    ### for just long enought to encrypt and mount the volume then are destroyed forever. 
-    ### this results in a mounted drive that can never be recovered once unmounted or the 
-    ### server is rebooted. All of this is logged extensivly as a audit trail. 
-    if ($options{'paranoid'}) {
-      printLC("  -> Paranoid mode selected, deleting header and LUKS keyfile.\n", 1);
-      printLC("  -> !! After this point, volume will be unrecoverable after reboot or unmount !!\n", 1);
-      printLC("  -> Zeroing LUKS header file...\n", $VERBOSE);
-      removeHdrKey($cryptID);
-    }
-    printLC("-> Success, volume is now mounted on $mountpoint\n", 1);
-  } else {
-    printLC("Aborting create...\n", 1);
-  }
-}
-
-sub newContainer {
-  
   my %options;
-  unless ((defined $CMDOPTIONS{s}) && (defined $CMDOPTIONS{m})) {
-   print "-c requires that -s and -m also be set\n";
-   return(0);
-  }
-  my $mountpoint = $CMDOPTIONS{m};
- 
-  # FIXME, valid container location
-  $options{'container'} = $options{'c'};
-  ($options{'size'}, $options{'unit'}) = isValidUnit($CMDOPTIONS{s});
-  if (!$options{'size'}) {
-    print "You have specified an invalid unit for the container size!\n";
-    exit(0);
-  }
 
-
+  if ($CMDOPTIONS{b}) {
+    $options{'type'} = "b";
+    unless (defined $CMDOPTIONS{m}) {
+      print "-b requires that -m also be set\n";
+      printLC("-> Invalid command line options, aborting\n");
+      logCLose();
+      exit(0);
+    }
+    $options{'device'} = $CMDOPTIONS{b};
+    if (defined($CMDOPTIONS{p})) {
+      $options{'paranoid'} = 1;
+    }
+    
+  } elsif ($CMDOPTIONS{c}) {
+    $options{'type'} = "c";
+    unless ((defined $CMDOPTIONS{s}) && (defined $CMDOPTIONS{m})) {
+      print "-c requires that -s and -m also be set\n";
+      printLC("-> Invalid command line options, aborting\n");
+      logClose();
+      exit(0);
+    }
+    $options{'location'} = $CMDOPTIONS{c};
+    ($options{'size'}, $options{'unit'}) = isValidUnit($CMDOPTIONS{s});
+    if (!$options{'size'}) {
+      print "!!! You have specified an invalid unit for the container size !!!\n";
+      printLC("-> Invalid command line options, aborting\n");
+      logClose();
+      exit(0);
+    }
+  }
+  $options{'mountpoint'} = $CMDOPTIONS{m};
+  return(%options);
 }
+
 
 ### zero and delete a LUKs header and suicideCrypt keyfile. 
 sub removeHdrKey {
