@@ -6,6 +6,8 @@
 # Status          : Released
 # requirements    : At least 4 gig of RAM, and enough space on local volumes to 
 #                 : hold any container of the size you wish to create. 
+# TODO            : Add subs for enhanced audit logs, unmounting and remounting 
+#                 : suicide crypt drives. 
 
 use strict;
 use warnings;
