@@ -13,11 +13,9 @@ my %logs_to_watch = (
 POE::Session->create(
   inline_states => {
     _start => \&begin_watchers,
-
     # Handle records from each log differently.
     suicideCrypt_record  => \&suicideCrypt_got_record,
     sys_record  => \&sys_got_record,
-
     # Handle log resets and errors the same way for each file.
     log_reset => \&generic_log_reset,
     log_error => \&generic_log_error,
@@ -32,7 +30,6 @@ POE::Session->create(
         got_child_close  => \&on_child_close,
         got_child_signal => \&on_child_signal,
         read_from_stdin => \&read_from_stdin,
-
     }
 );
 
@@ -40,7 +37,6 @@ $poe_kernel->run();
 exit 0;
 
 #### Subs below here. 
-
 
 sub begin_watchers {
   my $heap = $_[HEAP];
@@ -83,7 +79,6 @@ sub suicideCrypt_got_record {
 
   print "New CryptLog line! : $log_record\n";
   return;
-
 }
 
 sub sys_got_record {
@@ -91,7 +86,6 @@ sub sys_got_record {
 
   print "New SysLog line! : $log_record";
   return;
-
 }
 
 sub on_start {
