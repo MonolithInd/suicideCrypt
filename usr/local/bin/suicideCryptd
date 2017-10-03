@@ -1,125 +1,143 @@
 #!/usr/bin/perl
-# This program forks children to handle a number of slow tasks.  It
-# uses POE::Filter::Reference so the child tasks can send back
-# arbitrary Perl data.  The constant MAX_CONCURRENT_TASKS limits the
-# number of forked processes that can run at any given time.
+
 use warnings;
 use strict;
-#use File::Tail;
-use POE qw(Wheel::Run Filter::Reference);
-sub MAX_CONCURRENT_TASKS () { 1 }
-my @tasks = qw(one two three four five);
+use POE qw(Wheel::Run Filter::Reference Wheel::FollowTail);
 
-# Start the session that will manage all the children.  The _start and
-# next_task events are handled by the same function.
+my %logs_to_watch = (
+  suicideCrypt  => "/var/log/suicideCrypt.log",
+  sys   => "/var/log/syslog",
+);
+
+# Tail the Logs we care about for responses.
 POE::Session->create(
   inline_states => {
-    _start      => \&start_tasks,
-    next_task   => \&start_tasks,
-    task_result => \&handle_task_result,
-    task_done   => \&handle_task_done,
-    task_debug  => \&handle_task_debug,
-    sig_child   => \&sig_child,
+    _start => \&begin_watchers,
+
+    # Handle records from each log differently.
+    suicideCrypt_record  => \&suicideCrypt_got_record,
+    sys_record  => \&sys_got_record,
+
+    # Handle log resets and errors the same way for each file.
+    log_reset => \&generic_log_reset,
+    log_error => \&generic_log_error,
   }
 );
 
-# Start as many tasks as needed so that the number of tasks is no more
-# than MAX_CONCURRENT_TASKS.  Every wheel event is accompanied by the
-# wheel's ID.  This function saves each wheel by its ID so it can be
-# referred to when its events are handled.
-# Wheel::Run's Program may be a code reference.  Here it's called via
-# a short anonymous sub so we can pass in parameters.
-sub start_tasks {
-  my ($kernel, $heap) = @_[KERNEL, HEAP];
-  while (keys(%{$heap->{task}}) < MAX_CONCURRENT_TASKS) {
-    my $next_task = shift @tasks;
-    last unless defined $next_task;
-    print "Starting task for $next_task...\n";
-    my $task = POE::Wheel::Run->new(
-      Program      => sub { do_stuff($next_task) },
-      StdoutFilter => POE::Filter::Reference->new(),
-      StdoutEvent  => "task_result",
-      StderrEvent  => "task_debug",
-      CloseEvent   => "task_done",
-    );
-    $heap->{task}->{$task->ID} = $task;
-    $kernel->sig_child($task->PID, "sig_child");
-  }
-}
-# This function is not a POE function!  It is a plain sub that will be
-# run in a forked off child.  It uses POE::Filter::Reference so that
-# it can return arbitrary information.  All POE filters can be used by
-# themselves, but their parameters and return values are always list
-# references.
-sub do_stuff {
-  binmode(STDOUT);    # Required for this to work on MSWin32
-  my $maxinterval = 10;
-  my $task   = shift;
-  my $filter = POE::Filter::Reference->new();
-  my $logfile = "/var/log/suicideCrypt.log";
-  my $first = 1;
+POE::Session->create(
+    inline_states => {
+        _start           => \&on_start,
+        got_child_stdout => \&on_child_stdout,
+        got_child_stderr => \&on_child_stderr,
+        got_child_close  => \&on_child_close,
+        got_child_signal => \&on_child_signal,
+        read_from_stdin => \&read_from_stdin,
 
-  my $file = File::Tail->new(name=>$logfile, maxinterval=> $maxinterval, adjustafter=>3) or ( die );
-  while (defined(my $line = $file->read)) {
-    chomp($line);
-    my %result = (
-      task   => $task,
-      status => "$logfile got: $line",
-    );
-    my $output = $filter->put([\%result]);
-   print @$output;
-  }
+    }
+);
 
-  # Simulate a long, blocking task.
-#  while (1) {
-#   sleep(rand 5);
-
-  # Generate a bogus result.  Note that this result will be passed by
-  # reference back to the parent process via POE::Filter::Reference.
-#    my %result = (
-#      task   => $task,
-#      status => "seems ok to me",
-#    );
-#
-  # Generate some output via the filter.  Note the strange use of list
-  # references.
-#    my $output = $filter->put([\%result]);
-#    print @$output;
-#  }
-}
-
-# Handle information returned from the task.  Since we're using
-# POE::Filter::Reference, the $result is however it was created in the
-# child process.  In this sample, it's a hash reference.
-sub handle_task_result {
-  my $result = $_[ARG0];
-  print "Result for $result->{task}: $result->{status}\n";
-}
-
-# Catch and display information from the child's STDERR.  This was
-# useful for debugging since the child's warnings and errors were not
-# being displayed otherwise.
-sub handle_task_debug {
-  my $result = $_[ARG0];
-  print "Debug: $result\n";
-}
-
-# The task is done.  Delete the child wheel, and try to start a new
-# task to take its place.
-sub handle_task_done {
-  my ($kernel, $heap, $task_id) = @_[KERNEL, HEAP, ARG0];
-  delete $heap->{task}->{$task_id};
-  $kernel->yield("next_task");
-}
-
-# Detect the CHLD signal as each of our children exits.
-sub sig_child {
-  my ($heap, $sig, $pid, $exit_val) = @_[HEAP, ARG0, ARG1, ARG2];
-  my $details = delete $heap->{$pid};
-
-  # warn "$$: Child $pid exited";
-}
-
-# Run until there are no more tasks.
 $poe_kernel->run();
 exit 0;
+
+#### Subs below here. 
+
+
+sub begin_watchers {
+  my $heap = $_[HEAP];
+  while (my ($service, $log_file) = each %logs_to_watch) {
+    my $log_watcher = POE::Wheel::FollowTail->new(
+      Filename   => $log_file,
+      InputEvent => $service . "_record",
+      ResetEvent => "log_reset",
+      ErrorEvent => "log_error",
+    );
+    $heap->{services}->{$log_watcher->ID} = $service;
+    $heap->{watchers}->{$log_watcher->ID} = $log_watcher;
+  }
+}
+
+# Handle log resets the same way for each file.  Simply recognize that
+# the log file was reset.
+sub generic_log_reset {
+  my ($heap, $wheel_id) = @_[HEAP, ARG0];
+  my $service = $heap->{services}->{$wheel_id};
+  print "--- $service log reset at ", scalar(gmtime), " GMT\n";
+}
+
+# Handle log errors the same way for each file.  Recognize that an
+# error occurred while watching the file, and shut the watcher down.
+# If this were a real log watcher, it would periodically try to resume
+# watching the log file.
+sub generic_log_error {
+  my ($heap, $operation, $errno, $error_string, $wheel_id) =
+    @_[HEAP, ARG0, ARG1, ARG2, ARG3];
+  my $service = $heap->{services}->{$wheel_id};
+  print "--- $service log $operation error $errno: $error_string\n";
+  print "--- Shutting down $service log watcher.\n";
+  delete $heap->{services}->{$wheel_id};
+  delete $heap->{watchers}->{$wheel_id};
+}
+
+sub suicideCrypt_got_record {
+  my $log_record = $_[ARG0];
+
+  print "New CryptLog line! : $log_record\n";
+  return;
+
+}
+
+sub sys_got_record {
+  my $log_record = $_[ARG0];
+
+  print "New SysLog line! : $log_record";
+  return;
+
+}
+
+sub on_start {
+    my $child = POE::Wheel::Run->new(
+        Conduit => 'pty-pipe',
+        Program     => ["udevadm monitor" ],
+        StdoutEvent => "got_child_stdout",
+        StderrEvent => "got_child_stderr",
+        CloseEvent  => "got_child_close",
+    );
+
+    $_[KERNEL]->sig_child($child->PID, "got_child_signal");
+
+    $_[HEAP]{children_by_wid}{$child->ID} = $child;
+    $_[HEAP]{children_by_pid}{$child->PID} = $child;
+    $_[HEAP]->{job} = $child;
+
+    print("Child pid ", $child->PID, " started as wheel ", $child->ID,
+".\n");
+}
+
+sub on_child_stdout {
+    my ($stdout_line, $wheel_id) = @_[ARG0, ARG1];
+    my $child = $_[HEAP]{children_by_wid}{$wheel_id};
+    print "pid ", $child->PID, " STDOUT: $stdout_line\n";
+}
+
+sub on_child_close {
+    my $wheel_id = $_[ARG0];
+    my $child    = delete $_[HEAP]{children_by_wid}{$wheel_id};
+
+    unless (defined $child) {
+        print "wid $wheel_id closed all pipes.\n";
+        return;
+    }
+
+    print "pid ", $child->PID, " closed all pipes.\n";
+    delete $_[HEAP]{children_by_pid}{$child->PID};
+}
+
+sub on_child_signal {
+    print "pid $_[ARG1] exited with status $_[ARG2].\n";
+    my $child = delete $_[HEAP]{children_by_pid}{$_[ARG1]};
+
+    # May have been reaped by on_child_close() .
+    return unless defined $child;
+    delete $_[HEAP]{children_by_wid}{$child->ID};
+}
+
