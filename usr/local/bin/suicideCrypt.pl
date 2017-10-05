@@ -302,8 +302,11 @@ sub destroyVolumes {
     $mapper = $allVols{$vol}{'mapper'};
     @temp = split('-', $mapper);
     $id = $temp[1];
-     # TODO!
+    $luksEraseCmd = "cryptsetup luksErase --batch-mode $allVols{$vol}{'blkdev'} >/dev/null 2>&1";
     printLC("-> Destroying sucideCrypt volume $mapper\n", $VERBOSE);
+    printLC("  -> Eraseing all keys from LUKS header!\n", $VERBOSE);
+    system($luksEraseCmd);
+    printLC("  -> Done erasing LUKS Header keys\n", $VERBOSE);
     printLC("  -> Umounting $allVols{$vol}{'mountpoint'}\n", $VERBOSE);
     system ("umount $mapper");
     printLC("  -> Done unmounting $mapper.\n", $VERBOSE);
@@ -311,7 +314,7 @@ sub destroyVolumes {
     system("cryptsetup close $mapper");
     printLC("  -> Done closing LUKS Volume $mapper\n", $VERBOSE);
     if (!($mapper =~ m/PARANOID/)) {
-      printLC("  -> Deleting LUKS Header and keyfiles from $RAMDISK\n", $VERBOSE);
+      printLC("  -> Deleting keyfiles from $RAMDISK\n", $VERBOSE);
       removeKey($id);
       printLC("  -> Done destroying suicideCrypt volume\n", $VERBOSE);
     } else {
