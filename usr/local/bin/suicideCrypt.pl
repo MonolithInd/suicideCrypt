@@ -12,6 +12,15 @@
 #                 : suicide crypt drives that aren't created in paranoid mode.
 #                 : * allow user specified Cipher and keysize (other than 4096)
 #                 : * check if block device has partitions before formatting
+#                 : use /dev/ramdom : dd if=/dev/random of=filename bs=1 count=512
+#                 : filessytem sync afer wipes.
+#From the aspect of actual security, LUKS with default parameters
+#  should be as good as most things that are FIPS-140-2 certified,
+#  although you may want to make sure to use /dev/random (by specifying
+#  --use-random on luksFormat) as randomness source for the master key
+#  to avoid being potentially insecure in an entropy-starved situation.
+
+
 
 use strict;
 use warnings;
