@@ -8,8 +8,10 @@
 # Status          : Released
 # requirements    : At least 4 gig of RAM, and enough space on local volumes to 
 #                 : hold any container of the size you wish to create. 
-# TODO            : Add subs for enhanced audit logs, unmounting and remounting 
+# TODO            : * Add subs for enhanced audit logs, unmounting and remounting 
 #                 : suicide crypt drives that aren't created in paranoid mode.
+#                 : * allow user specified Cipher and keysize (other than 4096)
+#                 : * check if block device has partitions before formatting
 
 use strict;
 use warnings;
@@ -76,23 +78,6 @@ printHelp();
 
 ### Begin subs ###
 
-### Kicks off the logger for full execution trail
-sub logStart {
-  my $msg = shift;
-
-  open($LOG, '>>', $LOGFILE) or die "Could not open logfile '$LOGFILE' $!";
-  $msg = "\n-> Opening Log file to begin a " . "$msg" . " event\n";
-  printLC($msg, $VERBOSE);
-}
-
-### Closes logger 
-sub logClose {
-
-  printLC("-> Operation complete closing logfile $LOGFILE\n", $VERBOSE);
-  close $LOG;
-
-}
-
 ### Parses all command line options and creates a global command hash
 sub parseOptions {
 
@@ -143,6 +128,11 @@ sub new {
     if ($createoptions{'paranoid'}) {
       printLC("  -> Paranoid mode selected, Erasing all keys from header and deleting LUKS keyfile.\n", 1);
       printLC("  -> !! After this point, volume will be unrecoverable after reboot or unmount !!\n", 1);
+      if ($createoptions{'type'} eq "c") {
+        luksEraseHdr("$createoptions{'location'}/suicideCrypt-PARANOID-$cryptID.img");
+      } elsif ($createoptions{'type'} eq "b") {
+        luksEraseHdr("$createoptions{'device'}");
+      }
       removeKey($cryptID);
     }
     printLC("-> Success, volume is now mounted on $mountpoint\n", 1);
@@ -167,7 +157,6 @@ sub getOptionsCL {
     if (defined($CMDOPTIONS{p})) {
       $options{'paranoid'} = 1;
     }
-    
   } elsif ($CMDOPTIONS{c}) {
     $options{'type'} = "c";
     unless ((defined $CMDOPTIONS{s}) && (defined $CMDOPTIONS{m})) {
@@ -189,22 +178,16 @@ sub getOptionsCL {
   return(%options);
 }
 
-
-### zero and delete a LUKs header and suicideCrypt keyfile. 
+### zero and delete a LUKs/suicideCrypt keyfile. 
 sub removeKey {
 	
   my $id = shift;
 
-#  printLC("  -> Zeroing LUKS header file...\n", $VERBOSE);
-#  zeroFile("$RAMDISK/lukshdr-$id");
-#  sleep 1;
-#  printLC("  -> Done zeroing LUKS header.\n", $VERBOSE);
   printLC("  -> Zeroing keyfile....\n", $VERBOSE);
-  zeroFile("$RAMDISK/keyfile-$id");
-  sleep 0.5;
+  zeroFile("$RAMDISK/keyfile-$id"); ## Lets overwrite it with Zeros before we unlink it. potential ram freezing.
+  sleep 0.5; # Lets sleep for a half second to make sure it writes to ram. Possibly no needed. To review.
   printLC("  -> Done Zeroing keyfile.\n", $VERBOSE);
   printLC("  -> Unlinking files...\n", $VERBOSE);
-#  unlink("$RAMDISK/lukshdr-$id");
   unlink("$RAMDISK/keyfile-$id");
   printLC("  -> Done unlinking LUKS keyfile.\n", $VERBOSE);
   if (is_folder_empty($RAMDISK)) {
@@ -215,7 +198,7 @@ sub removeKey {
   }
 }
 
-### destroy a suicideCrypt drive, can take a mount point, mapper refrence,
+### destroy a suicideCrypt volume, can take a mount point, mapper refrence,
 ### or if nothing given lets the user select from a list.
 sub destroy {
 
@@ -253,7 +236,7 @@ sub destroy {
   } else {
     foreach $val (@volNum) {
       if (($volume =~ $allVols{$val}{'mapper'}) || ($volume =~ $allVols{$val}{'mountpoint'})) {
-        print "\nVALID suicideCrypt volume\n";
+#        print "\nVALID suicideCrypt volume\n";
         push @destroyVol, $val;
         destroyVolumes(@destroyVol);
         exit(1);
@@ -270,7 +253,6 @@ sub destroyAll {
 
   my %allVols = getMounted();
   my @volNum = keys(%allVols);  
-
 
   if (!@volNum) {
     print "\nNo suicideCrypt volumes detected mounted on this host, doing nothing\n\n";
@@ -296,17 +278,13 @@ sub destroyVolumes {
   my @temp;
   my $mapper;
   my $id;
-  my $luksEraseCmd;
 
   foreach $vol (@destroyVols) {
     $mapper = $allVols{$vol}{'mapper'};
     @temp = split('-', $mapper);
     $id = $temp[1];
-    $luksEraseCmd = "cryptsetup luksErase --batch-mode $allVols{$vol}{'blkdev'} >/dev/null 2>&1";
     printLC("-> Destroying sucideCrypt volume $mapper\n", $VERBOSE);
-    printLC("  -> Eraseing all keys from LUKS header!\n", $VERBOSE);
-    system($luksEraseCmd);
-    printLC("  -> Done erasing LUKS Header keys\n", $VERBOSE);
+    luksEraseHdr($allVols{$vol}{'blkdev'});
     printLC("  -> Umounting $allVols{$vol}{'mountpoint'}\n", $VERBOSE);
     system ("umount $mapper");
     printLC("  -> Done unmounting $mapper.\n", $VERBOSE);
@@ -323,6 +301,19 @@ sub destroyVolumes {
     printLC("-> SuicideCrypt volume $mapper is destroyed and unrecoverable\n", 1);
   }
 }
+
+sub luksEraseHdr {
+
+  my $device = shift;
+  my $luksEraseCmd = "cryptsetup luksErase --batch-mode $device >/dev/null 2>&1";
+  
+  print "Deleting keys on $device\n";
+  printLC("  -> Eraseing all keys from LUKS header!\n", $VERBOSE);
+  system($luksEraseCmd);
+  printLC("  -> Done erasing LUKS Header keys\n", $VERBOSE);
+  return 1;
+}
+
 
 ### list all mounted suicideCrypt volumes. 
 sub listsuicideCryptVol {
@@ -373,20 +364,6 @@ sub getMounted {
   }
   return %vols;
 }
-
-### Create an empty header file for cryptsetup to write to that isn't built into the volume.
-### important for suicideCrypt as the header contains the decryption key we want to 
-### destroy in the event of compromise/theft of server etc. 
-#sub createHeaderFile {
-#
-#  my $cmd = "dd if=/dev/zero bs=4049600 count=1 of=$RAMDISK/lukshdr-$cryptID >/dev/null 2>&1";
-#
-#  printLC("  -> Creating an empty LUKS header file for the volume: $RAMDISK/lukshdr-$cryptID\n", $VERBOSE);
-#  system ($cmd);
-#  printLC("  -> Success creating LUKS Header\n", $VERBOSE);
-#  return (1);
-#
-#}
 
 ### Create an randomised 4096 byte keyfile to encrypt the volumes with important for suicideCrypt as 
 ### the user never knows the content of this key. Once it is deleted in the audit trail. The user 
@@ -448,7 +425,8 @@ sub printOptions {
   }
   print "## Mount point:        $mountpoint\n";
   print "## Keyfile:            4096 bytes of random data\n";
-  print "## Cipher:             AES256\n";
+  print "## Hash spec:          sha512\n";
+  print "## Cipher:             aes256\n";
   print "## Paranoid Mode:      ";
   if ($paranoid) {
     print "yes\n";
@@ -509,16 +487,23 @@ sub createContainer {
   my $location = $options{'location'};
   my $mountpoint = $options{'mountpoint'};
   my $containerCmd = "dd if=/dev/zero of=$location/$cryptFileName.img bs=1 count=0 seek=$size$unit >/dev/null 2>&1";
-  my $cryptSetupCmd = "cryptsetup luksFormat -s 512 --batch-mode $location/$cryptFileName.img $RAMDISK/keyfile-$cryptID";
+  my $cryptSetupCmd = "cryptsetup luksFormat -s 512 --hash sha512 --batch-mode $location/$cryptFileName.img $RAMDISK/keyfile-$cryptID";
   my $cryptOpenCmd = "cryptsetup luksOpen $location/$cryptFileName.img $cryptFileName --key-file $RAMDISK/keyfile-$cryptID";
   my $cryptFmtCmd  = "mkfs.ext4 /dev/mapper/$cryptFileName >/dev/null 2>&1";
   my $mntCmd = "mount /dev/mapper/$cryptFileName $mountpoint";
   my $result;
 
   printLC("  -> Creating blank container file for LUKS...\n", $VERBOSE);
-  # TODO verify that container was created correctly. 
   system($containerCmd);
-  printLC("  -> Success creating blank container\n", $VERBOSE);
+  if (-e "$location/$cryptFileName.img") {
+     printLC("  -> Success creating blank container\n", $VERBOSE);
+  } else { 
+    printLC("  -> Failed to create blank container file! Please check permissions\n", 1);
+    printLC("  -> Cleaning up created header...\n", 1);
+    removeKey($cryptID);
+    printLC("-> Creating the requested volume FAILED!\n", 1);
+    exit(0);
+  }  
   printLC("  -> Using Cryptsetup to encrypt container file...\n", $VERBOSE);
   system($cryptSetupCmd);
   printLC("  -> Success encrypting container\n", $VERBOSE);
@@ -531,7 +516,6 @@ sub createContainer {
   printLC("  -> Mounting your encrypted container on $mountpoint...\n", $VERBOSE);
   system($mntCmd);
   printLC("  -> Success mounting container\n", $VERBOSE);
-  
 }
 
 sub createBlock {
@@ -546,7 +530,7 @@ sub createBlock {
   }
   my $mountpoint = $options{'mountpoint'};
   my $device = $options{'device'};
-  my $cryptSetupCmd = "cryptsetup luksFormat -s 512 --batch-mode $device $RAMDISK/keyfile-$cryptID";
+  my $cryptSetupCmd = "cryptsetup luksFormat -s 512 --hash sha512 --batch-mode $device $RAMDISK/keyfile-$cryptID";
   my $cryptOpenCmd = "cryptsetup luksOpen $device $cryptFileName --key-file $RAMDISK/keyfile-$cryptID";
   my $cryptFmtCmd  = "mkfs.ext4 /dev/mapper/$cryptFileName >/dev/null 2>&1";
   my $mntCmd = "mount /dev/mapper/$cryptFileName $mountpoint";
@@ -808,5 +792,23 @@ sub printVer {
   print "\nsucicideCrypt version $VERSION\n\n";
 
 }
+
+### Kicks off the logger for full execution trail
+sub logStart {
+  my $msg = shift;
+
+  open($LOG, '>>', $LOGFILE) or die "Could not open logfile '$LOGFILE' $!";
+  $msg = "\n-> Opening Log file to begin a " . "$msg" . " event\n";
+  printLC($msg, $VERBOSE);
+}
+
+### Closes logger 
+sub logClose {
+
+  printLC("-> Operation complete closing logfile $LOGFILE\n", $VERBOSE);
+  close $LOG;
+
+}
+
 
 ### EOF ###
