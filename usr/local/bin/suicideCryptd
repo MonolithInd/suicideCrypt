@@ -3,9 +3,19 @@
 use warnings;
 use strict;
 use Config::General;
+use Data::Dumper;
 use POE qw(Wheel::Run Filter::Reference Wheel::FollowTail);
 
 # requirements :  libpoe-perl, libconfig-general-perl, libio-pty-perl
+
+my $conf = Config::General->new(
+         -ConfigFile => "../../../etc/suicideCrypt/suicideCryptd.conf",
+);
+my %configH = $conf->getall;
+
+print "Dumping hash\n";
+print Dumper(%configH);
+
 
 my %logs_to_watch = (
   suicideCrypt  => "/var/log/suicideCrypt.log",
