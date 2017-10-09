@@ -13,9 +13,8 @@ my $conf = Config::General->new(
 );
 my %configH = $conf->getall;
 
-print "Dumping hash\n";
-print Dumper(%configH);
-
+my %drives;
+my %alerts;
 
 my %logs_to_watch = (
   suicideCrypt  => "/var/log/suicideCrypt.log",
@@ -35,6 +34,9 @@ POE::Session->create(
   }
 );
 
+
+# Monitor UDEV for UDEV events
+# change to generic system event monitor mirroring above that can be handed system demons to call. 
 POE::Session->create(
     inline_states => {
         _start           => \&on_start,
@@ -97,7 +99,7 @@ sub suicideCrypt_got_record {
 sub sys_got_record {
   my $log_record = $_[ARG0];
 
-  print "New SysLog line! : $log_record";
+#  print "New SysLog line! : $log_record";
   return;
 }
 
@@ -109,7 +111,8 @@ sub on_start {
         StderrEvent => "got_child_stderr",
         CloseEvent  => "got_child_close",
     );
-
+    my $name = "udevadm";
+    $alerts{$name}{alert} = 0;
     $_[KERNEL]->sig_child($child->PID, "got_child_signal");
 
     $_[HEAP]{children_by_wid}{$child->ID} = $child;
@@ -123,7 +126,13 @@ sub on_start {
 sub on_child_stdout {
     my ($stdout_line, $wheel_id) = @_[ARG0, ARG1];
     my $child = $_[HEAP]{children_by_wid}{$wheel_id};
-    print "pid ", $child->PID, " STDOUT: $stdout_line\n";
+    if ($stdout_line =~ m/usb/) {
+      if (!($alerts{udevadm}{alert})) {
+        $alerts{udevadm}{alert} = 1;
+        print "WARNING! USB State change detected\n";
+      }
+    }
+#    print "pid ", $child->PID, " STDOUT: $stdout_line\n";
 }
 
 sub on_child_close {
