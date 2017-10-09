@@ -8,6 +8,7 @@
 # Status          : Released
 # requirements    : At least 4 gig of RAM, and enough space on local volumes to 
 #                 : hold any container of the size you wish to create. 
+#		  : libjson-perl
 # TODO            : * Add subs for enhanced audit logs, unmounting and remounting 
 #                 : suicide crypt drives that aren't created in paranoid mode.
 #                 : * allow user specified Cipher and keysize (other than 4096)

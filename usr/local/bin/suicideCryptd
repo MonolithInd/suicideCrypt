@@ -2,9 +2,10 @@
 
 use warnings;
 use strict;
+use Config::General;
 use POE qw(Wheel::Run Filter::Reference Wheel::FollowTail);
 
-# requirements : libconfig-tiny-perl, libpoe-perl, libconfig-general-perl
+# requirements :  libpoe-perl, libconfig-general-perl, libio-pty-perl
 
 my %logs_to_watch = (
   suicideCrypt  => "/var/log/suicideCrypt.log",
