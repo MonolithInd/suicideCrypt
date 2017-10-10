@@ -12,22 +12,19 @@ my $conf = Config::General->new(
          -ConfigFile => "../../../etc/suicideCrypt/suicideCryptd.conf",
 );
 my %configH = $conf->getall;
-
-my %drives;
+my @logsToWatch;
+# my %drives;
 my %alerts;
-
-my %logs_to_watch = (
-  suicideCrypt  => "/var/log/suicideCrypt.log",
-  sys   => "/var/log/syslog",
-);
+my @systemUsers = getSystemUsers();
+my @allowedUsers = getAllowedUsers();
 
 # Tail the Logs we care about for responses.
 POE::Session->create(
   inline_states => {
     _start => \&begin_watchers,
     # Handle records from each log differently.
-    suicideCrypt_record  => \&suicideCrypt_got_record,
-    sys_record  => \&sys_got_record,
+    ossec_record  => \&ossec_got_record,
+    auth_record  => \&auth_got_record,
     # Handle log resets and errors the same way for each file.
     log_reset => \&generic_log_reset,
     log_error => \&generic_log_error,
@@ -48,6 +45,31 @@ POE::Session->create(
     }
 );
 
+# POE session to run round looking for alerts.
+POE::Session->create(
+  inline_states => {
+    _start => sub {
+      $_[KERNEL]->alias_set('FetishWatchdog');
+      $_[HEAP]->{next_alarm_time} = int(time()) + 2;
+      $_[KERNEL]->alarm(tick => $_[HEAP]->{next_alarm_time});
+    },
+    tick => sub {
+      my $key;
+      my $name;
+
+      foreach $key (keys %alerts) {
+        if ($alerts{$key}{alert}) {
+          # Do all the magic bits!
+        }
+      }
+      $_[HEAP]->{next_alarm_time} = $_[HEAP]->{next_alarm_time} + 2;
+      $_[KERNEL]->alarm(tick => $_[HEAP]->{next_alarm_time});
+    },
+  },
+);
+
+
+
 $poe_kernel->run();
 exit 0;
 
@@ -55,12 +77,25 @@ exit 0;
 
 sub begin_watchers {
   my $heap = $_[HEAP];
-  while (my ($service, $log_file) = each %logs_to_watch) {
-    my $log_watcher = POE::Wheel::FollowTail->new(
-      Filename   => $log_file,
-      InputEvent => $service . "_record",
-      ResetEvent => "log_reset",
-      ErrorEvent => "log_error",
+  my $key;
+  my $service;
+  my $log_file;
+  my $log_watcher;
+
+  foreach $key (keys(% {$configH{logs}} )) {
+    unless ($configH{logs}{$key}{enabled}) {
+	next;
+    }
+    $service = $key;
+    $alerts{$service}{alert} = 0;
+    $log_file = $configH{logs}{$key}{location};
+    print "Starting a log processs for $key!\n";
+    print "Watching : $log_file\n";
+    $log_watcher = POE::Wheel::FollowTail->new(
+	Filename   => $log_file,
+	InputEvent => $service . "_record",
+	ResetEvent => "log_reset",
+	 ErrorEvent => "log_error",
     );
     $heap->{services}->{$log_watcher->ID} = $service;
     $heap->{watchers}->{$log_watcher->ID} = $log_watcher;
@@ -89,17 +124,45 @@ sub generic_log_error {
   delete $heap->{watchers}->{$wheel_id};
 }
 
-sub suicideCrypt_got_record {
+sub ossec_got_record {
   my $log_record = $_[ARG0];
+  my $alertLevel;
 
-  print "New CryptLog line! : $log_record\n";
+  # Ok, we got a new OSSec alert, lets parse for a level of dangerous.
+  if ($log_record =~ m/level (\d+)/ ) {
+    if ($1 >= 11) {
+      print "We got a level of $1!! Immediatly react\n";
+    }
+  }
   return;
 }
 
-sub sys_got_record {
+sub auth_got_record {
   my $log_record = $_[ARG0];
+  my $user; 
+  my $okUser;
+  my $ok = 0;
 
-#  print "New SysLog line! : $log_record";
+  if ($log_record =~ m/session opened for user (\w+) /) {
+    $user = $1;
+    print "New AuthLog line! For user $user\n";
+    if (($log_record =~ m/cron:session/) && ($configH{logs}{auth}{ignorecron})) {
+      print "We're allowing this as we're ignoring cron\n"; 
+      return 1;
+    }
+    foreach $okUser (@allowedUsers) {
+      if ($okUser eq $user) {
+        $ok = 1;
+      }
+    }
+    if ($ok) {
+      print "User $user is in the allowed list, moving on\n";
+      $ok = 0;
+    } else { 
+      print "Illegal usr $user logged in! Panic!\n";
+      $alerts{auth}{alert} = 1;
+    }
+  }
   return;
 }
 
@@ -132,7 +195,6 @@ sub on_child_stdout {
         print "WARNING! USB State change detected\n";
       }
     }
-#    print "pid ", $child->PID, " STDOUT: $stdout_line\n";
 }
 
 sub on_child_close {
@@ -157,3 +219,34 @@ sub on_child_signal {
     delete $_[HEAP]{children_by_wid}{$child->ID};
 }
 
+sub getSystemUsers {
+
+  my $fh;
+  my @users;
+  my @line;
+  my $user;
+  my $filename = "/etc/passwd";
+
+
+  open($fh, '<', $filename) or die "Could not open file '$filename' $!";
+  while (<$fh>) {
+    @line = split(/:/, $_);
+    if ($line[2] < 1000)  {
+      push @users, $line[0];
+    }
+  }
+  return @users;
+}
+
+sub getAllowedUsers {
+  my @allowed;
+
+  @allowed = split(/,/, $configH{logs}{auth}{allowedusers});
+  if ($configH{logs}{auth}{allowsystemusers}) {
+    @allowed = (@allowed, @systemUsers);
+  }
+  return @allowed;
+}
+
+
+### EOF ###
