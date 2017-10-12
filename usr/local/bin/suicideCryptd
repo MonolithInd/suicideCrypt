@@ -15,6 +15,7 @@ my %configH = $conf->getall;
 my @logsToWatch;
 # my %drives;
 my %alerts;
+my $ALERTTEMP = 35;
 my @systemUsers = getSystemUsers();
 my @allowedUsers = getAllowedUsers();
 
@@ -31,20 +32,6 @@ POE::Session->create(
   }
 );
 
-
-# Monitor UDEV for UDEV events
-# change to generic system event monitor mirroring above that can be handed system demons to call. 
-POE::Session->create(
-    inline_states => {
-        _start           => \&on_start,
-        got_child_stdout => \&on_child_stdout,
-        got_child_stderr => \&on_child_stderr,
-        got_child_close  => \&on_child_close,
-        got_child_signal => \&on_child_signal,
-        read_from_stdin => \&read_from_stdin,
-    }
-);
-
 # POE session to run round looking for alerts.
 POE::Session->create(
   inline_states => {
@@ -57,9 +44,12 @@ POE::Session->create(
       my $key;
       my $name;
 
+#      print Dumper %alerts;
       foreach $key (keys %alerts) {
         if ($alerts{$key}{alert}) {
-          # Do all the magic bits!
+          print "We have an alert for $key! Do stuffs!\n";
+          # reset the alert; 
+          $alerts{$key}{alert} = 0;
         }
       }
       $_[HEAP]->{next_alarm_time} = $_[HEAP]->{next_alarm_time} + 2;
@@ -68,8 +58,35 @@ POE::Session->create(
   },
 );
 
+# Start a POE session to monitor lm-sensors for temperature events
+if ($configH{systemevents}{sensors}{enabled}) {
+  print "Starting a sensors session\n";
+  POE::Session->create(
+    inline_states => {
+      _start      => \&startsensors,
+      got_child_stdout   => \&got_child_stdout,
+      got_child_stderr => \&got_child_stderr,
+      got_child_close   => \&got_child_close,
+      got_sigchld   => \&got_sigchld,
+    }
+  );
+}
 
+# Start a POE session to monito udevadm for HW additions and removals. 
+if ($configH{systemevents}{udevadm}{enabled}) {
+  print "Starting a udevadm session\n";
+  POE::Session->create(
+    inline_states => {
+      _start      => \&startudevadm,
+      got_child_stdout   => \&got_child_stdout,
+      got_child_stderr => \&got_child_stderr,
+      got_child_close   => \&got_child_close,
+      got_sigchld   => \&got_sigchld,
+    }
+  );
+}
 
+# Start our POE Kernel.
 $poe_kernel->run();
 exit 0;
 
@@ -89,8 +106,7 @@ sub begin_watchers {
     $service = $key;
     $alerts{$service}{alert} = 0;
     $log_file = $configH{logs}{$key}{location};
-    print "Starting a log processs for $key!\n";
-    print "Watching : $log_file\n";
+    print "Starting a log watch processs for $key!\n";
     $log_watcher = POE::Wheel::FollowTail->new(
 	Filename   => $log_file,
 	InputEvent => $service . "_record",
@@ -131,7 +147,7 @@ sub ossec_got_record {
   # Ok, we got a new OSSec alert, lets parse for a level of dangerous.
   if ($log_record =~ m/level (\d+)/ ) {
     if ($1 >= 11) {
-      print "We got a level of $1!! Immediatly react\n";
+      $alerts{ossec}{alert} = 1;
     }
   }
   return;
@@ -145,9 +161,9 @@ sub auth_got_record {
 
   if ($log_record =~ m/session opened for user (\w+) /) {
     $user = $1;
-    print "New AuthLog line! For user $user\n";
+#    print "New AuthLog line! For user $user\n";
     if (($log_record =~ m/cron:session/) && ($configH{logs}{auth}{ignorecron})) {
-      print "We're allowing this as we're ignoring cron\n"; 
+#      print "We're allowing this as we're ignoring cron\n"; 
       return 1;
     }
     foreach $okUser (@allowedUsers) {
@@ -156,68 +172,117 @@ sub auth_got_record {
       }
     }
     if ($ok) {
-      print "User $user is in the allowed list, moving on\n";
+#      print "User $user is in the allowed list, moving on\n";
       $ok = 0;
     } else { 
-      print "Illegal usr $user logged in! Panic!\n";
+      # non allowed user logged in! Panic!
       $alerts{auth}{alert} = 1;
     }
   }
   return;
 }
 
-sub on_start {
-    my $child = POE::Wheel::Run->new(
-        Conduit => 'pty-pipe',
-        Program     => ["udevadm monitor" ],
-        StdoutEvent => "got_child_stdout",
-        StderrEvent => "got_child_stderr",
-        CloseEvent  => "got_child_close",
-    );
-    my $name = "udevadm";
-    $alerts{$name}{alert} = 0;
-    $_[KERNEL]->sig_child($child->PID, "got_child_signal");
+sub startsensors {
+  my ($kernel, $heap) = @_[KERNEL, HEAP];
 
-    $_[HEAP]{children_by_wid}{$child->ID} = $child;
-    $_[HEAP]{children_by_pid}{$child->PID} = $child;
-    $_[HEAP]->{job} = $child;
-
-    print("Child pid ", $child->PID, " started as wheel ", $child->ID,
-".\n");
+  $heap->{child} = POE::Wheel::Run->new(
+    Program => sub { monitor_sensors() },
+#    Conduit => 'pty-pipe',
+    StdioFilter  => POE::Filter::Line->new(),    # Child speaks in lines.
+    StderrFilter => POE::Filter::Line->new(),    # Child speaks in lines.
+    StdoutEvent  => "got_child_stdout",          # Child wrote to STDOUT.
+    StderrEvent  => "got_child_stderr",          # Child wrote to STDERR.
+    CloseEvent   => "got_child_close",           # Child stopped writing.
+  );
+  $kernel->sig_child($heap->{child}->PID, "got_sigchld");
 }
 
-sub on_child_stdout {
-    my ($stdout_line, $wheel_id) = @_[ARG0, ARG1];
-    my $child = $_[HEAP]{children_by_wid}{$wheel_id};
-    if ($stdout_line =~ m/usb/) {
-      if (!($alerts{udevadm}{alert})) {
-        $alerts{udevadm}{alert} = 1;
-        print "WARNING! USB State change detected\n";
-      }
+sub startudevadm {
+  my ($kernel, $heap) = @_[KERNEL, HEAP];
+
+  $heap->{child} = POE::Wheel::Run->new(
+    Program => ["udevadm monitor"],    # Program to run.
+    Conduit => 'pty-pipe',
+    StdioFilter  => POE::Filter::Line->new(),    # Child speaks in lines.
+    StderrFilter => POE::Filter::Line->new(),    # Child speaks in lines.
+    StdoutEvent  => "got_child_stdout",          # Child wrote to STDOUT.
+    StderrEvent  => "got_child_stderr",          # Child wrote to STDERR.
+    CloseEvent   => "got_child_close",           # Child stopped writing.
+  );
+  $kernel->sig_child($heap->{child}->PID, "got_sigchld");
+}
+
+sub monitor_sensors {
+  my $result;
+  my @lines;
+  my $line;
+  my $sensor;
+  my $temp;
+  
+  while (1) {  
+    $result = `sensors -u`;
+    @lines = split (/\n/, $result);
+      foreach $line (@lines) {
+        if ($line =~ /(temp\d*)_input: (\d*).\d*/) {
+	  ($sensor, $temp) = ($1, $2);
+          if ($temp <= $ALERTTEMP) {
+            print "sensors,$sensor,$temp\n";
+          }
+        }
+     }
+     sleep 1;
+   }
+} 
+
+# Deal with information the child wrote to its STDOUT.
+sub got_child_stdout {
+  my $stdout = $_[ARG0];
+  my @values;
+
+  if ($stdout =~ /,/) { 
+    @values = split(/,/, $stdout);
+    if ($values[0] eq "sensors") {
+      $alerts{$values[1]}{alert} = 1;
     }
+  }
+#  print "STDOUT: $stdout\n";
 }
 
-sub on_child_close {
-    my $wheel_id = $_[ARG0];
-    my $child    = delete $_[HEAP]{children_by_wid}{$wheel_id};
+# Deal with information the child wrote to its STDERR.  These are
+# warnings and possibly error messages.
+sub got_child_stderr {
+  my $stderr = $_[ARG0];
+  $stderr =~ tr[ -~][]cd;
+  print "STDERR: $stderr\n";
+}
 
-    unless (defined $child) {
-        print "wid $wheel_id closed all pipes.\n";
-        return;
+# The child has closed its output filehandles.  It will not be sending
+# us any more information, so destroy it.
+sub got_child_close {
+  my $heap = $_[HEAP];
+  print "child closed.\n";
+  delete $heap->{child};
+}
+
+# Handle SIGCHLD, otherwise the child process will not be reaped.
+# Don't do anything significant, but do catch the signal so the child
+# process is reaped.
+sub got_sigchld {
+  print "SIGCHLD reaped.\n";
+}
+
+sub getSystemEvents {
+  my $key;
+  my @results;
+
+  foreach $key (%{$configH{systemevents}}) {
+    if ($configH{systemevents}{$key}{enabled}) {
+      push @results, $key;
     }
-
-    print "pid ", $child->PID, " closed all pipes.\n";
-    delete $_[HEAP]{children_by_pid}{$child->PID};
+  }
+  return @results;
 }
 
-sub on_child_signal {
-    print "pid $_[ARG1] exited with status $_[ARG2].\n";
-    my $child = delete $_[HEAP]{children_by_pid}{$_[ARG1]};
-
-    # May have been reaped by on_child_close() .
-    return unless defined $child;
-    delete $_[HEAP]{children_by_wid}{$child->ID};
-}
 
 sub getSystemUsers {
 
@@ -247,6 +312,5 @@ sub getAllowedUsers {
   }
   return @allowed;
 }
-
 
 ### EOF ###

@@ -317,7 +317,6 @@ sub luksEraseHdr {
   my $device = shift;
   my $luksEraseCmd = "cryptsetup luksErase --batch-mode $device >/dev/null 2>&1";
   
-  print "Deleting keys on $device\n";
   printLC("  -> Eraseing all keys from LUKS header!\n", $VERBOSE);
   system($luksEraseCmd);
   printLC("  -> Done erasing LUKS Header keys\n", $VERBOSE);
