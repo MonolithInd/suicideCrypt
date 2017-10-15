@@ -2,20 +2,22 @@
 
 use warnings;
 use strict;
+use JSON;
 use Config::General;
 use Data::Dumper;
 use POE qw(Wheel::Run Filter::Reference Wheel::FollowTail);
 
-# requirements :  libpoe-perl, libconfig-general-perl, libio-pty-perl
+# requirements :  libpoe-perl, libconfig-general-perl, libio-pty-perl libjson-perl
 
 my $conf = Config::General->new(
          -ConfigFile => "../../../etc/suicideCrypt/suicideCryptd.conf",
 );
 my %configH = $conf->getall;
 my @logsToWatch;
-# my %drives;
+my %VOLUMES;
+my %MANUALVOLUMES;
 my %alerts;
-my $ALERTTEMP = 35;
+my $ALERTTEMP = 33;
 my @systemUsers = getSystemUsers();
 my @allowedUsers = getAllowedUsers();
 
@@ -32,11 +34,36 @@ POE::Session->create(
   }
 );
 
+# POE session to check for new suicideCrypt mounts and add them to monitoring. 
+POE::Session->create(
+  inline_states => {
+    _start => sub {
+      $_[KERNEL]->alias_set('MountWatchdog');
+      $_[HEAP]->{next_alarm_time} = int(time()) + 5;
+      $_[KERNEL]->alarm(tick => $_[HEAP]->{next_alarm_time});
+    },
+    tick => sub {
+      my $key;
+      my $name;
+      my %tempvol;
+
+      %tempvol = getMounted();
+      updateVols(\%tempvol);
+#      %VOLUMES = %tempvol;
+      print Dumper %VOLUMES;
+
+
+      $_[HEAP]->{next_alarm_time} = $_[HEAP]->{next_alarm_time} + 5;
+      $_[KERNEL]->alarm(tick => $_[HEAP]->{next_alarm_time});
+    },
+  },
+);
+
 # POE session to run round looking for alerts.
 POE::Session->create(
   inline_states => {
     _start => sub {
-      $_[KERNEL]->alias_set('FetishWatchdog');
+      $_[KERNEL]->alias_set('AlertWatchdog');
       $_[HEAP]->{next_alarm_time} = int(time()) + 2;
       $_[KERNEL]->alarm(tick => $_[HEAP]->{next_alarm_time});
     },
@@ -44,7 +71,7 @@ POE::Session->create(
       my $key;
       my $name;
 
-#      print Dumper %alerts;
+
       foreach $key (keys %alerts) {
         if ($alerts{$key}{alert}) {
           print "We have an alert for $key! Do stuffs!\n";
@@ -60,7 +87,7 @@ POE::Session->create(
 
 # Start a POE session to monitor lm-sensors for temperature events
 if ($configH{systemevents}{sensors}{enabled}) {
-  print "Starting a sensors session\n";
+  print "Starting an lm-sensors monitor\n";
   POE::Session->create(
     inline_states => {
       _start      => \&startsensors,
@@ -74,7 +101,7 @@ if ($configH{systemevents}{sensors}{enabled}) {
 
 # Start a POE session to monito udevadm for HW additions and removals. 
 if ($configH{systemevents}{udevadm}{enabled}) {
-  print "Starting a udevadm session\n";
+  print "Starting a udevadm monitor\n";
   POE::Session->create(
     inline_states => {
       _start      => \&startudevadm,
@@ -187,7 +214,6 @@ sub startsensors {
 
   $heap->{child} = POE::Wheel::Run->new(
     Program => sub { monitor_sensors() },
-#    Conduit => 'pty-pipe',
     StdioFilter  => POE::Filter::Line->new(),    # Child speaks in lines.
     StderrFilter => POE::Filter::Line->new(),    # Child speaks in lines.
     StdoutEvent  => "got_child_stdout",          # Child wrote to STDOUT.
@@ -239,6 +265,10 @@ sub got_child_stdout {
   my $stdout = $_[ARG0];
   my @values;
 
+
+  if ($stdout =~ /^UDEV/) {
+    processUDEV($stdout);
+  }
   if ($stdout =~ /,/) { 
     @values = split(/,/, $stdout);
     if ($values[0] eq "sensors") {
@@ -269,6 +299,36 @@ sub got_child_close {
 # process is reaped.
 sub got_sigchld {
   print "SIGCHLD reaped.\n";
+}
+
+sub processUDEV {
+  my $msg = shift;
+  my @message = split(' ', $msg);
+
+#  print "$message[4]\n";
+  if ($message[4] eq "(usb)") {
+    if ($configH{systemevents}{udevadm}{devices}{usb}) {
+      print "USB State change!\n";
+      $alerts{udevadm}{alert} = 1;
+    }
+  } elsif ($message[4] eq "(hid)") {
+    if ($configH{systemevents}{udevadm}{devices}{keyboardmouse}) {
+      print "Keyboard or Mouse state change detected!\n";
+      $alerts{udevadm}{alert} = 1;
+    }
+  } elsif ($message[4] eq "(drm)") {
+    if ($configH{systemevents}{udevadm}{devices}{monitor}) {
+      print "Potential Monitor state change detected!\n";
+      $alerts{udevadm}{alert} = 1;
+    }
+   # Not really wise at this point to put this in until can tree UDEV devices, otherwise
+   # we detect a suicideCrypt drive creation as an alert and delete it. FAIL.
+#  } elsif ($message[4] eq "(block)" || $message[4] eq "(scsi)") {
+#    if ($configH{systemevents}{udevadm}{devices}{disk}) {
+#      print "Potential Hard disk or USB Disk state change detected!\n";
+#      $alerts{udevadm}{alert} = 1;
+#    }
+  }
 }
 
 sub getSystemEvents {
@@ -311,6 +371,62 @@ sub getAllowedUsers {
     @allowed = (@allowed, @systemUsers);
   }
   return @allowed;
+}
+
+sub getMounted {
+
+  my $devCmdJ = "lsblk -J -s -p";
+  my $cmdOutput;
+  my $dev;
+  my $volume;
+  my $child;
+  my $count = 1;
+  my %vols;
+  my $mountpoint;
+
+  $cmdOutput = `$devCmdJ`;
+
+  $dev = from_json($cmdOutput, {utf8 => 1});
+
+  foreach my $volume (@{ $dev->{'blockdevices'} }) {
+    $mountpoint = $volume->{mountpoint};
+    if ($volume->{name} =~ "suicideCrypt-") {
+      $vols{$mountpoint}{'mapper'} = $volume->{name};
+      $vols{$mountpoint}{'type'} = "suicideCrypt";
+      $vols{$mountpoint}{'mountpoint'} = $volume->{mountpoint};
+      foreach my $child (@{ $volume->{'children'} }) {
+         $vols{$mountpoint}{'blkdev'} = $child->{name}
+      }
+    }
+  }
+  return %vols;
+}
+
+sub updateVols {
+  my %volhash = %{$_[0]};
+  my $key;
+  my $found = 0;
+
+  # Check if the drives found are being monitored and if not start watching them.
+  foreach $key (keys(%volhash)) {
+    if (!$VOLUMES{$key}) {
+      print "New volume detected, inserting into hash\n";
+      $VOLUMES{$key} = $volhash{$key};
+    } else {
+      print "Volume already enumerated, ignoring and  continuing\n";
+    }
+  }
+  # find drives that have gone away and stop watching them.
+  foreach $key (keys(%VOLUMES)) {
+    if ($volhash{$key}) {
+      # Volume still exists Don't need to do anything
+    } else {
+      # Volume has gone away since we last enumerated. Since we didn't delete it,
+      # clearly someone manually removed it
+      print "Drive went away, removing it!\n";
+      delete $VOLUMES{$key};
+    }
+  }
 }
 
 ### EOF ###
