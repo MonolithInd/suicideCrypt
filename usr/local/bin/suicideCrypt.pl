@@ -13,7 +13,7 @@
 #                 : suicide crypt drives that aren't created in paranoid mode.
 #                 : * allow user specified Cipher and keysize (other than 4096)
 #                 : * check if block device has partitions before formatting
-#                 : use /dev/ramdom : dd if=/dev/random of=filename bs=1 count=512
+#                 : use /dev/random : dd if=/dev/random of=filename bs=1 count=512
 #                 : filessytem sync afer wipes.
 #From the aspect of actual security, LUKS with default parameters
 #  should be as good as most things that are FIPS-140-2 certified,
@@ -102,6 +102,7 @@ sub parseOptions {
             "d|destroy:s",
             "D|destroyall",
             "p|paranoid",
+            "r|random",
             "y|yes",
             "h|help")
   or die("Error in command line arguments\n");
@@ -112,7 +113,6 @@ sub new {
 
   my %createoptions;
   my $mountpoint;
-
 
   if ($CMDOPTIONS{'c'} || $CMDOPTIONS{'b'}) {
     %createoptions = getOptionsCL();
@@ -208,6 +208,26 @@ sub removeKey {
   }
 }
 
+sub removeHdr {
+
+  my $id = shift; 
+
+  printLC("  -> Zeroing LUKS Header file....\n", $VERBOSE);   
+  zeroFile("$RAMDISK/hdrfile-$id"); ## Lets overwrite it with Zeros before we unlink it. potential ram freezing.
+  sleep 0.5; # Lets sleep for a half second to make sure it writes to ram. Possibly no needed. To review. 
+  printLC("  -> Done Zeroing hdrfile.\n", $VERBOSE); 
+  printLC("  -> Unlinking files...\n", $VERBOSE);
+  unlink("$RAMDISK/hdrfile-$id");
+  printLC("  -> Done unlinking LUKS header file.\n", $VERBOSE);
+  if (is_folder_empty($RAMDISK)) {                                                                                                                                                                                                                                                  
+    printLC("  -> RAMDISK is empty, no more volumes, unmounting and deleting $RAMDISK\n", $VERBOSE);                                                                                                                                                                                
+    system("umount $RAMDISK");                                                                                                                                                                                                                                                      
+    rmdir($RAMDISK);                                                                                                                                                                                                                                                                
+    printLC("  -> Done unmounting and deleting $RAMDISK\n", $VERBOSE);                                                                                                                                                                                                              
+  } 
+}
+
+
 ### destroy a suicideCrypt volume, can take a mount point, mapper refrence,
 ### or if nothing given lets the user select from a list.
 sub destroy {
@@ -302,8 +322,9 @@ sub destroyVolumes {
     system("cryptsetup close $mapper");
     printLC("  -> Done closing LUKS Volume $mapper\n", $VERBOSE);
     if (!($mapper =~ m/PARANOID/)) {
-      printLC("  -> Deleting keyfiles from $RAMDISK\n", $VERBOSE);
+      printLC("  -> Deleting keyfiles and header files from $RAMDISK\n", $VERBOSE);
       removeKey($id);
+      removeHdr($id);
       printLC("  -> Done destroying suicideCrypt volume\n", $VERBOSE);
     } else {
       printLC("  -> Paranoid mode volume, no headers or keyfiles to delete\n", $VERBOSE);
@@ -317,9 +338,10 @@ sub luksEraseHdr {
   my $device = shift;
   my $luksEraseCmd = "cryptsetup luksErase --batch-mode $device >/dev/null 2>&1";
   
-  printLC("  -> Eraseing all keys from LUKS header!\n", $VERBOSE);
+  printLC("  -> Wiping keys from on disk header...\n", $VERBOSE);
   system($luksEraseCmd);
-  printLC("  -> Done erasing LUKS Header keys\n", $VERBOSE);
+  system("sync");
+  printLC("  -> Done erasing on disk LUKS header keys\n", $VERBOSE);
   return 1;
 }
 
@@ -446,21 +468,18 @@ sub printOptions {
 
 sub createTMPfs {
 
-  my $cmd = "mount -t tmpfs -o size=512m tmpfs $RAMDISK";
+  # Here we create the ramdisk for the storage of the hdr and key files
+  # NB: We use a ramfs instead of a tmpfs because ramfs doesn't write to swap
+  # if memory fills up. However if you keep writing to the ramdisk then you 
+  # can fill up ram and crash the system. Don't use the SC ramdisk for other
+  # things. You can change this to a tmpfs disk below if you like. but be aware
+  # that this could severly decrease the security of your disks. 
+# my $cmd = "mount -t tmpfs -o size=512m tmpfs $RAMDISK";
+  my $cmd = "mount ramfs $RAMDISK -t ramfs";
   my $fh;
   my $line;
   my $found = 0;
 
-  printLC("  -> Creating ramdisk for LUKS header and keyfile...\n", $VERBOSE);
-  if (-d $RAMDISK) {
-    printLC("    -> $RAMDISK already exisits, assuming previous suicideCrypt use on running system and continuing...\n", $VERBOSE);
-  } else { 
-    printLC("    -> creating ram disk mount point: $RAMDISK\n", $VERBOSE); 
-    unless(mkdir $RAMDISK) {
-      die "Unable to create ram disk : $RAMDISK\n";
-    }
-    printLC("    -> Success creating ramdisk mount point\n", $VERBOSE);
-  }
   # Lets check if there is a suicideCrypt ramdisk already mounted.
   open ($fh, '<', "/proc/mounts");
   while ($line = <$fh>) {
@@ -470,15 +489,28 @@ sub createTMPfs {
       #do nothing
     }
   }
-  close ($fh);
+  close $fh;
   if ($found) {
     printLC("    -> Found exisitng mounted suicideCrypt ramdisk, assuming exisitng suicideCrypt devices and continuing...\n", $VERBOSE);
-  } else {
-    printLC("    -> Mounting 512m ramdisk on $RAMDISK.\n", $VERBOSE);
-    system($cmd);
-    printLC("    -> Success mounting ramdisk\n", $VERBOSE);
+    return (1);
   }
-  printLC("  -> ramdisk creation Success.\n", $VERBOSE);
+  # Otherwise lets make one...
+  printLC("  -> Creating ramdisk for LUKS header and keyfile...\n", $VERBOSE);
+  if (-d $RAMDISK) {
+    # Dir already exists (perhaps bad delete previosly? Stale? Either way, use it)
+    printLC("    -> $RAMDISK already exisits, assuming previous suicideCrypt use on running system and continuing...\n", $VERBOSE);
+  } else { 
+    printLC("    -> creating ram disk mount point: $RAMDISK\n", $VERBOSE); 
+    unless(mkdir $RAMDISK) {
+      die "Unable to create ram disk : $RAMDISK\n";
+    }
+    printLC("    -> Success creating ramdisk mount point\n", $VERBOSE);
+  }
+
+  printLC("    -> Mounting 512m ramdisk on $RAMDISK.\n", $VERBOSE);
+  system($cmd);
+  printLC("    -> Success mounting ramdisk\n", $VERBOSE);
+  printLC("  -> Ramdisk creation Success.\n", $VERBOSE);
 }
 
 sub createContainer { 
@@ -494,37 +526,16 @@ sub createContainer {
   my $size = $options{'size'};
   my $unit = $options{'unit'};
   my $location = $options{'location'};
-  my $mountpoint = $options{'mountpoint'};
-  my $containerCmd = "dd if=/dev/zero of=$location/$cryptFileName.img bs=1 count=0 seek=$size$unit >/dev/null 2>&1";
-  my $cryptSetupCmd = "cryptsetup luksFormat -s 512 --hash sha512 --batch-mode $location/$cryptFileName.img $RAMDISK/keyfile-$cryptID";
-  my $cryptOpenCmd = "cryptsetup luksOpen $location/$cryptFileName.img $cryptFileName --key-file $RAMDISK/keyfile-$cryptID";
-  my $cryptFmtCmd  = "mkfs.ext4 /dev/mapper/$cryptFileName >/dev/null 2>&1";
-  my $mntCmd = "mount /dev/mapper/$cryptFileName $mountpoint";
+  my $mountPoint = $options{'mountpoint'};
   my $result;
 
-  printLC("  -> Creating blank container file for LUKS...\n", $VERBOSE);
-  system($containerCmd);
-  if (-e "$location/$cryptFileName.img") {
-     printLC("  -> Success creating blank container\n", $VERBOSE);
-  } else { 
-    printLC("  -> Failed to create blank container file! Please check permissions\n", 1);
-    printLC("  -> Cleaning up created header...\n", 1);
-    removeKey($cryptID);
-    printLC("-> Creating the requested volume FAILED!\n", 1);
-    exit(0);
-  }  
-  printLC("  -> Using Cryptsetup to encrypt container file...\n", $VERBOSE);
-  system($cryptSetupCmd);
-  printLC("  -> Success encrypting container\n", $VERBOSE);
-  printLC("  -> Opening the Encrypted container and creating /dev/mapper link...\n", $VERBOSE);
-  system ($cryptOpenCmd);
-  printLC("  -> Success creating /dev/mapper/$cryptFileName\n", $VERBOSE);
-  printLC("  -> Formatting the unencrypted container EXT4, this may take a while depending on container size...\n", $VERBOSE);
-  system($cryptFmtCmd);
-  printLC("  -> Success formatting container\n", $VERBOSE);
-  printLC("  -> Mounting your encrypted container on $mountpoint...\n", $VERBOSE);
-  system($mntCmd);
-  printLC("  -> Success mounting container\n", $VERBOSE);
+  createContFile("$location/$cryptFileName.img", "$size$unit");
+  setupCryptVol("$location/$cryptFileName.img");
+  backupLuksHdr("$location/$cryptFileName.img");
+  luksEraseHdr("$location/$cryptFileName.img");
+  unlockCryptVol("$cryptFileName", "$location/$cryptFileName.img");
+  formatCryptVol("$cryptFileName");
+  mountCryptVol("$cryptFileName", "$mountPoint");
 }
 
 sub createBlock {
@@ -539,14 +550,29 @@ sub createBlock {
   }
   my $mountpoint = $options{'mountpoint'};
   my $device = $options{'device'};
-  my $cryptSetupCmd = "cryptsetup luksFormat -s 512 --hash sha512 --batch-mode $device $RAMDISK/keyfile-$cryptID";
-  my $cryptOpenCmd = "cryptsetup luksOpen $device $cryptFileName --key-file $RAMDISK/keyfile-$cryptID";
+  my $cryptSetupCmd;
+  if ($CMDOPTIONS{r}) {
+    $cryptSetupCmd = "cryptsetup luksFormat -s 512 --hash sha512 --use-random --batch-mode $device $RAMDISK/keyfile-$cryptID";
+  } else {
+    $cryptSetupCmd = "cryptsetup luksFormat -s 512 --hash sha512 --batch-mode $device $RAMDISK/keyfile-$cryptID"; 
+  }
+  my $cryptHdrBackupCmd = "cryptsetup luksHeaderBackup $device --header-backup-file $RAMDISK/hdrfile-$cryptID";
+  my $cryptOpenCmd = "cryptsetup luksOpen $device $cryptFileName --key-file $RAMDISK/keyfile-$cryptID --header=$RAMDISK/hdrfile-$cryptID";
   my $cryptFmtCmd  = "mkfs.ext4 /dev/mapper/$cryptFileName >/dev/null 2>&1";
   my $mntCmd = "mount /dev/mapper/$cryptFileName $mountpoint";
 
   printLC("  -> Using cryptsetup to encrypt the block device $device...\n", $VERBOSE);
   system($cryptSetupCmd);
   printLC("  -> Success encrypting block device\n", $VERBOSE);
+  printLC("  -> Backing up LUKS header to ramdisk...\n", $VERBOSE);
+  system($cryptHdrBackupCmd);
+  # TODO check the file was made!
+  printLC("  -> Success Backing up LUKS header.\n", $VERBOSE);
+  printLC("  -> Wiping keys from on disk header...\n", $VERBOSE);
+  luksEraseHdr("$device");
+  # do a filesystem sync to ensure flush.
+  system("sync");
+  printLC("  -> Finished wiping on disk header.\n",  $VERBOSE);
   printLC("  -> Opening the Encrypted container and creating /dev/mapper link...\n", $VERBOSE);
   system ($cryptOpenCmd);
   printLC("  -> Success creating /dev/mapper/$cryptFileName\n", $VERBOSE);
@@ -559,9 +585,89 @@ sub createBlock {
  
 }
 
+sub createContFile {
+  my $filename = shift;
+  my $size = shift;
+  my $containerCmd = "dd if=/dev/zero of=$filename bs=1 count=0 seek=$size >/dev/null 2>&1";
+
+  printLC("  -> Creating blank container file for LUKS...\n", $VERBOSE);
+  system($containerCmd);
+  if (-e "$filename") {
+    printLC("  -> Success creating blank container\n", $VERBOSE);
+    return (1);
+  } else { 
+    printLC("  -> Failed to create blank container file! Please check permissions\n", 1);
+    printLC("  -> Cleaning up created header...\n", 1);
+    removeKey($cryptID);
+    printLC("-> Creating the requested volume FAILED!\n", 1);
+    exit(0);
+  }
+}
+
+sub setupCryptVol {
+  my $volume = shift;
+  my $keyfile = "$RAMDISK/keyfile-$cryptID";
+  my $cryptSetupCmd;
+
+  if ($CMDOPTIONS{r}) {
+    $cryptSetupCmd = "cryptsetup luksFormat -s 512 --hash sha512 --use-random --batch-mode $volume $keyfile";
+  } else {
+    $cryptSetupCmd = "cryptsetup luksFormat -s 512 --hash sha512 --batch-mode $volume $keyfile";
+  }
+  printLC("  -> Using Cryptsetup to encrypt container file...\n", $VERBOSE);
+  system($cryptSetupCmd);
+  #TODO check this worked. 
+  printLC("  -> Success encrypting container\n", $VERBOSE);
+  return (1);
+}
+
+sub backupLuksHdr {
+  my $volume = shift;
+  my $hdrfile = "$RAMDISK/hdrfile-$cryptID";
+  my $cryptHdrBackupCmd = "cryptsetup luksHeaderBackup $volume --header-backup-file $hdrfile";
+
+  printLC("  -> Backing up LUKS header to ramdisk...\n", $VERBOSE);
+  system($cryptHdrBackupCmd);
+  # TODO check the file was made!
+  printLC("  -> Success Backing up LUKS header.\n", $VERBOSE);
+  return (1);
+}
+
+sub unlockCryptVol {
+  my $cryptName = shift;
+  my $filename = shift;
+  my $cryptOpenCmd = "cryptsetup luksOpen $filename $cryptName --key-file $RAMDISK/keyfile-$cryptID --header=$RAMDISK/hdrfile-$cryptID";
+
+  printLC("  -> Opening the Encrypted container and creating /dev/mapper link...\n", $VERBOSE);
+  system ($cryptOpenCmd);
+  # TODO make sure this worked
+  printLC("  -> Success creating /dev/mapper/$cryptName\n", $VERBOSE);
+  return(1);
+
+}
+
+sub formatCryptVol {
+  my $cryptFileName = shift;
+  my $cryptFmtCmd  = "mkfs.ext4 /dev/mapper/$cryptFileName >/dev/null 2>&1";
+
+  printLC("  -> Formatting the unencrypted container EXT4, this may take a while depending on container size...\n", $VERBOSE);
+  system($cryptFmtCmd);
+  printLC("  -> Success formatting container\n", $VERBOSE);
+  return (1);
+}
+
+sub mountCryptVol  {
+  my $cryptFileName = shift;
+  my $mountPoint = shift;
+  my $mntCmd = "mount /dev/mapper/$cryptFileName $mountPoint";
+
+  printLC("  -> Mounting your encrypted container on $mountPoint...\n", $VERBOSE);
+  system($mntCmd);
+  printLC("  -> Success mounting container\n", $VERBOSE);
+  return (1);
+}
 
 sub getOptions {
-
   my %options;
 
   print "\n*** Welcome to suicideCrypt $VERSION.*** \n\n";
@@ -679,7 +785,7 @@ sub getSize {
   my $unit;
 
   while (!$valid) {
-    print "\nPlease enter the size of the container you wish to create in megabytes or gigabytes (e.g, 500M or 5G):";
+    print "\nPlease enter the size of the container you wish to create in megabytes or gigabytes (e.g, 500m or 5g):";
     $selection = <STDIN>;
     chomp($selection);
     ($size, $unit) = isValidUnit($selection);
@@ -698,6 +804,7 @@ sub isValidUnit {
   my $unit;
 
   $unit = chop($size);
+  $unit = uc ($unit);
   if (($unit eq "G") || ($unit eq "M")) {
     return($size, $unit);
   } else {
@@ -766,12 +873,13 @@ sub printHelp {
   print "-n : create an encrypted volume in interactive mode\n";
   print "-c <path> : Create a file container encrypted volume located on <path>, requires -s, -m, and optionally -p, -y\n";
   print "-b <block device> : Create a block device encrypted volume, requires -b, -m, and optionally -p, -y\n";
-  print "-s <numM/G> : Size of encrypted container, must be of format <size>M/G, used with -c\n";
+  print "-s <size>m/g : Size of encrypted container in meg or gig, used with -c\n";
   print "-m <mountpoint> : Mountpoint for encrypted volume, used with -c and -b\n";
   print "-l : List all suicideCrypt created volumes\n";
   print "-d <volume, or leave blank for list> : Destroy an encrypted volume.\n";
   print "-D : Destroy all detectable suicideCrypt volumes on this host.\n";
   print "-p : default to paranoid mode in all volume creations.\n";
+  print "-r : Use /dev/random instead of /dev/urandom for all random number collection. WARNING, can significantly slow down volume creation\n";
   print "-y : assume \"yes\" to all destroy/create confirmations. WARNING: You can delete a lot of data this way!\n";
   print "-v : verbose, display more detail on execution.\n";
   print "-h : Display this text.\n\n"; 
@@ -818,6 +926,5 @@ sub logClose {
   close $LOG;
 
 }
-
 
 ### EOF ###

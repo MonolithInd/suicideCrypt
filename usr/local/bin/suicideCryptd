@@ -12,15 +12,20 @@ use POE qw(Wheel::Run Filter::Reference Wheel::FollowTail);
 my $conf = Config::General->new(
          -ConfigFile => "../../../etc/suicideCrypt/suicideCryptd.conf",
 );
+my $VERSION = 0.5;
+my $DEBUG = 0;
 my %configH = $conf->getall;
+my $VERBOSE = $configH{verbose};
 my @logsToWatch;
 my %VOLUMES;
 my %MANUALVOLUMES;
-my %alerts;
+my %ALERTS;
 my $ALERTTEMP = 33;
 my @systemUsers = getSystemUsers();
 my @allowedUsers = getAllowedUsers();
 
+print "\n *** Starting suicideCryptd version $VERSION *** \n\n" if $VERBOSE;
+print "-> Starting Moitoring Sessions...\n" if $VERBOSE;
 # Tail the Logs we care about for responses.
 POE::Session->create(
   inline_states => {
@@ -49,9 +54,6 @@ POE::Session->create(
 
       %tempvol = getMounted();
       updateVols(\%tempvol);
-#      %VOLUMES = %tempvol;
-      print Dumper %VOLUMES;
-
 
       $_[HEAP]->{next_alarm_time} = $_[HEAP]->{next_alarm_time} + 5;
       $_[KERNEL]->alarm(tick => $_[HEAP]->{next_alarm_time});
@@ -72,11 +74,20 @@ POE::Session->create(
       my $name;
 
 
-      foreach $key (keys %alerts) {
-        if ($alerts{$key}{alert}) {
-          print "We have an alert for $key! Do stuffs!\n";
+      foreach $key (keys %ALERTS) {
+        if ($ALERTS{$key}{alert}) {
+          print "\n\n*\\ Alert!\n" if $VERBOSE;
+          if ($key =~ /temp/) {
+            print "**\\------> We have detected a potential RAM chill event from lm-sensors: $key!\n" if $VERBOSE;
+          } elsif ($key =~ /udev/) {
+	    print "**\\------> We have detected a UDEV hardware change event $key!\n" if $VERBOSE;
+          } elsif ($key =~ /ossec/) {
+            print "**\\------> We have detected a ossec alert event $key!\n" if $VERBOSE;
+          } elsif ($key =~ /auth/) { 
+            print "**\\------> We have detected an auth log alert event $key!\n" if $VERBOSE;
+          }
           # reset the alert; 
-          $alerts{$key}{alert} = 0;
+          $ALERTS{$key}{alert} = 0;
         }
       }
       $_[HEAP]->{next_alarm_time} = $_[HEAP]->{next_alarm_time} + 2;
@@ -87,7 +98,7 @@ POE::Session->create(
 
 # Start a POE session to monitor lm-sensors for temperature events
 if ($configH{systemevents}{sensors}{enabled}) {
-  print "Starting an lm-sensors monitor\n";
+  print "  -> Starting an lm-sensors monitor\n" if $VERBOSE;
   POE::Session->create(
     inline_states => {
       _start      => \&startsensors,
@@ -101,7 +112,7 @@ if ($configH{systemevents}{sensors}{enabled}) {
 
 # Start a POE session to monito udevadm for HW additions and removals. 
 if ($configH{systemevents}{udevadm}{enabled}) {
-  print "Starting a udevadm monitor\n";
+  print "  -> Starting a udevadm monitor\n" if $VERBOSE;
   POE::Session->create(
     inline_states => {
       _start      => \&startudevadm,
@@ -112,6 +123,8 @@ if ($configH{systemevents}{udevadm}{enabled}) {
     }
   );
 }
+
+print "-> All configured monitors starts.\n" if $VERBOSE;
 
 # Start our POE Kernel.
 $poe_kernel->run();
@@ -131,9 +144,9 @@ sub begin_watchers {
 	next;
     }
     $service = $key;
-    $alerts{$service}{alert} = 0;
+    $ALERTS{$service}{alert} = 0;
     $log_file = $configH{logs}{$key}{location};
-    print "Starting a log watch processs for $key!\n";
+    print "  -> Starting a log watch processs for $key!\n";
     $log_watcher = POE::Wheel::FollowTail->new(
 	Filename   => $log_file,
 	InputEvent => $service . "_record",
@@ -150,7 +163,7 @@ sub begin_watchers {
 sub generic_log_reset {
   my ($heap, $wheel_id) = @_[HEAP, ARG0];
   my $service = $heap->{services}->{$wheel_id};
-  print "--- $service log reset at ", scalar(gmtime), " GMT\n";
+  print "--> $service log reset at ", scalar(gmtime), " GMT\n" if $VERBOSE;
 }
 
 # Handle log errors the same way for each file.  Recognize that an
@@ -161,8 +174,8 @@ sub generic_log_error {
   my ($heap, $operation, $errno, $error_string, $wheel_id) =
     @_[HEAP, ARG0, ARG1, ARG2, ARG3];
   my $service = $heap->{services}->{$wheel_id};
-  print "--- $service log $operation error $errno: $error_string\n";
-  print "--- Shutting down $service log watcher.\n";
+  print "--> $service log $operation error $errno: $error_string\n" if $VERBOSE;
+  print "--> Shutting down $service log watcher.\n";
   delete $heap->{services}->{$wheel_id};
   delete $heap->{watchers}->{$wheel_id};
 }
@@ -174,7 +187,7 @@ sub ossec_got_record {
   # Ok, we got a new OSSec alert, lets parse for a level of dangerous.
   if ($log_record =~ m/level (\d+)/ ) {
     if ($1 >= 11) {
-      $alerts{ossec}{alert} = 1;
+      $ALERTS{ossec}{alert} = 1;
     }
   }
   return;
@@ -188,9 +201,8 @@ sub auth_got_record {
 
   if ($log_record =~ m/session opened for user (\w+) /) {
     $user = $1;
-#    print "New AuthLog line! For user $user\n";
     if (($log_record =~ m/cron:session/) && ($configH{logs}{auth}{ignorecron})) {
-#      print "We're allowing this as we're ignoring cron\n"; 
+      # Ignore this as we are allowing CRON events (Geenrally a good idea)
       return 1;
     }
     foreach $okUser (@allowedUsers) {
@@ -199,11 +211,11 @@ sub auth_got_record {
       }
     }
     if ($ok) {
-#      print "User $user is in the allowed list, moving on\n";
+      # User is in the OK list, more on and reset $ok for next check
       $ok = 0;
     } else { 
       # non allowed user logged in! Panic!
-      $alerts{auth}{alert} = 1;
+      $ALERTS{auth}{alert} = 1;
     }
   }
   return;
@@ -272,10 +284,9 @@ sub got_child_stdout {
   if ($stdout =~ /,/) { 
     @values = split(/,/, $stdout);
     if ($values[0] eq "sensors") {
-      $alerts{$values[1]}{alert} = 1;
+      $ALERTS{$values[1]}{alert} = 1;
     }
   }
-#  print "STDOUT: $stdout\n";
 }
 
 # Deal with information the child wrote to its STDERR.  These are
@@ -308,24 +319,24 @@ sub processUDEV {
 #  print "$message[4]\n";
   if ($message[4] eq "(usb)") {
     if ($configH{systemevents}{udevadm}{devices}{usb}) {
-      print "USB State change!\n";
-      $alerts{udevadm}{alert} = 1;
+      print "--> USB State change!\n" if $DEBUG;
+      $ALERTS{udevadm}{alert} = 1;
     }
   } elsif ($message[4] eq "(hid)") {
     if ($configH{systemevents}{udevadm}{devices}{keyboardmouse}) {
-      print "Keyboard or Mouse state change detected!\n";
-      $alerts{udevadm}{alert} = 1;
+      print "--> Keyboard or Mouse state change detected!\n" if $DEBUG;
+      $ALERTS{udevadm}{alert} = 1;
     }
   } elsif ($message[4] eq "(drm)") {
     if ($configH{systemevents}{udevadm}{devices}{monitor}) {
-      print "Potential Monitor state change detected!\n";
-      $alerts{udevadm}{alert} = 1;
+      print "--> Potential Monitor state change detected!\n" if $DEBUG;
+      $ALERTS{udevadm}{alert} = 1;
     }
    # Not really wise at this point to put this in until can tree UDEV devices, otherwise
    # we detect a suicideCrypt drive creation as an alert and delete it. FAIL.
 #  } elsif ($message[4] eq "(block)" || $message[4] eq "(scsi)") {
 #    if ($configH{systemevents}{udevadm}{devices}{disk}) {
-#      print "Potential Hard disk or USB Disk state change detected!\n";
+#      print "Potential Hard disk or USB Disk state change detected!\n" if $DEBUG;
 #      $alerts{udevadm}{alert} = 1;
 #    }
   }
@@ -410,10 +421,10 @@ sub updateVols {
   # Check if the drives found are being monitored and if not start watching them.
   foreach $key (keys(%volhash)) {
     if (!$VOLUMES{$key}) {
-      print "New volume detected, inserting into hash\n";
+      print "  --> New suicideCrypt volume detected, inserting into monitoring hash\n" if ($DEBUG >= 2);
       $VOLUMES{$key} = $volhash{$key};
     } else {
-      print "Volume already enumerated, ignoring and  continuing\n";
+      print "  --> Returned Volume already being watched, ignoring and continuing\n" if ($DEBUG >= 2);
     }
   }
   # find drives that have gone away and stop watching them.
@@ -423,7 +434,7 @@ sub updateVols {
     } else {
       # Volume has gone away since we last enumerated. Since we didn't delete it,
       # clearly someone manually removed it
-      print "Drive went away, removing it!\n";
+      print "  --> Drive removed since last check, stopping monitoring\n" if ($DEBUG >= 2);
       delete $VOLUMES{$key};
     }
   }
