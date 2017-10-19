@@ -64,13 +64,17 @@ if (defined $CMDOPTIONS{h}) {
 } elsif (defined $CMDOPTIONS{b}) {
   logStart("Create");
   %USROPT = getOptionsCL();
-  new(%USROPT);
+  if (%USROPT) {
+    new(%USROPT);
+  }
   logClose();
   exit(1);
 } elsif (defined $CMDOPTIONS{c}) { ## is this needed? 
   logStart("Create");
   %USROPT = getOptionsCL();
-  new(%USROPT);
+  if (%USROPT) {
+    new(%USROPT);
+  }
   logClose();
   exit(1);
 } elsif (defined $CMDOPTIONS{l}) {
@@ -125,15 +129,16 @@ sub new {
   } else {
     $cryptName = "suicideCrypt-$cryptID";
   }
-  print "\nWe are now ready to create your encrypted volume with the following options:\n";
+  print "\nWe are now ready to create your encrypted volume with the following options:\n\n";
   printOptions(%usropt); # show the user their choices for conformation before execution 
+  print "\nDo you wish to continue? (y/n):";
   if (yN()) {
     if ($usropt{'type'} eq "c") {
       $volume = "$usropt{'location'}/$cryptName.img";
     } elsif ($usropt{'type'} eq "b") {
       $volume = "$usropt{'device'}";
     }
-    printLC("-> Creating the requested volume...\n", 1);
+    printLC("\n-> Creating the requested volume...\n", 1);
     createTMPfs();
     createKeyFile();
     if ($usropt{'type'} eq "c") { 
@@ -154,7 +159,7 @@ sub new {
 
     printLC("-> Success, volume is now mounted on $usropt{'mountpoint'}\n", 1);
   } else { 
-    printLC("Aborting create...\n", 1);
+    printLC("-> Aborting create...\n", 1);
   }
 } 
 
@@ -168,8 +173,13 @@ sub getOptionsCL {
     unless (defined $CMDOPTIONS{m}) {
       print "-b requires that -m also be set\n";
       printLC("-> Invalid command line options, aborting\n");
-      logCLose();
-      exit(0);
+      %options = ();
+      return(%options);
+    }
+    unless (-e $CMDOPTIONS{b}) {
+      print "\n** $CMDOPTIONS{b} is not a valid block device! Please re-enter a valid device **\n\n";
+      %options = ();
+      return(%options);
     }
     $options{'device'} = $CMDOPTIONS{b};
     if (defined($CMDOPTIONS{p})) {
@@ -180,17 +190,29 @@ sub getOptionsCL {
     unless ((defined $CMDOPTIONS{s}) && (defined $CMDOPTIONS{m})) {
       print "-c requires that -s and -m also be set\n";
       printLC("-> Invalid command line options, aborting\n");
-      logClose();
-      exit(0);
+      %options = ();
+      return(%options); 
+    }
+    unless (-d $CMDOPTIONS{c}) {
+      print "\n**  You have specified an invalid location for the container file **\n\n";
+      printLC("-> Invalid command line options, aborting\n");
+      %options = (); 
+      return(%options);
     }
     $options{'location'} = $CMDOPTIONS{c};
     ($options{'size'}, $options{'unit'}) = isValidUnit($CMDOPTIONS{s});
-    if (!$options{'size'}) {
-      print "!!! You have specified an invalid unit for the container size !!!\n";
+    unless ($options{'size'}) {
+      print "\n**  You have specified an invalid unit for the container size **\n\n";
       printLC("-> Invalid command line options, aborting\n");
-      logClose();
-      exit(0);
+      %options = (); 
+      return(%options);
     }
+  }
+  unless ((-d $CMDOPTIONS{m}) && is_folder_empty($CMDOPTIONS{m}) ) {  
+    print "\n** Specified mountpoint is not emptry or doesn't exist ** \n\n";
+    printLC("-> Invalid command line options, aborting\n");
+    %options = ();
+    return(%options);
   }
   $options{'mountpoint'} = $CMDOPTIONS{m};
   return(%options);
@@ -249,8 +271,8 @@ sub destroy {
   my @destroyVol;
 
   if (!@volNum) {
-    printLC("-> No suicideCrypt volumes detected mounted on this host, doing nothing\n", 1);
-    exit(1);
+    printLC("\n-> No suicideCrypt volumes detected mounted on this host, doing nothing\n\n", 1);
+    return (0);
   }
   if (!$volume) {
     print "\nNo volume specified, Please choose which mounted volume to destroy from this list:\n";
@@ -292,11 +314,12 @@ sub destroyAll {
   my @volNum = keys(%allVols);  
 
   if (!@volNum) {
-    print "\nNo suicideCrypt volumes detected mounted on this host, doing nothing\n\n";
+    printLC ("\n-> No suicideCrypt volumes detected mounted on this host, doing nothing\n\n", 1);
+    return (0);
     exit(1);
   } 
   print "\nYou have chosen to destroy ALL detectable mounted suicideCrypt volumes on this host!\n";
-  if (yN()) {
+  if (yes()) {
     printLC("\n-> Destroying all detectable mounted suicideCrypt Volumes\n", 1);
     destroyVolumes(@volNum);
     printLC("-> Done Destroying All Volumes\n", 1);
@@ -315,13 +338,15 @@ sub destroyVolumes {
   my @temp;
   my $mapper;
   my $id;
+  my $deleteable = 0;
 
   foreach $vol (@destroyVols) {
     $mapper = $allVols{$vol}{'mapper'};
     @temp = split('-', $mapper);
     $id = $temp[1];
     printLC("-> Destroying sucideCrypt volume $mapper\n", $VERBOSE);
-    luksEraseHdr($allVols{$vol}{'blkdev'});
+    # Lets get rid of the key and header file (if they exist) first, the faster
+    # we get rid of these the faster the volume is destroyed.
     if (!($mapper =~ m/PARANOID/)) {
       printLC("  -> Deleting keyfiles and header files from $RAMDISK\n", $VERBOSE);
       removeKey($id);
@@ -329,15 +354,89 @@ sub destroyVolumes {
     } else {
       printLC("  -> Paranoid mode volume, no headers or keyfiles to delete\n", $VERBOSE);
     }
+    # Lets wipe the on disk header again, just in case it wasn't done during creation.
+    luksEraseHdr($allVols{$vol}{'blkdev'});
+    # Grab the file location before we unmount it and can't get that info anymore.
+    if ($allVols{$vol}{'blkdev'} =~ /loop/) {
+      $deleteable = getContainer($allVols{$vol}{'blkdev'});
+    }
     printLC("  -> Umounting $allVols{$vol}{'mountpoint'}\n", $VERBOSE);
     system ("umount $mapper");
     printLC("  -> Done unmounting $mapper.\n", $VERBOSE);
     printLC("  -> Closing LUKS Crypt volume $mapper\n", $VERBOSE);
     system("cryptsetup close $mapper");
     printLC("  -> Done closing LUKS Volume $mapper\n", $VERBOSE);
+    if ($deleteable) {
+      if ($CMDOPTIONS{y}) {
+        deleteCont($deleteable);
+      } else {
+        print "  -> This volume was a mounted container, do you want to delete the container file? (y/n):";
+        if (yN()) {
+          deleteCont($deleteable);
+        }
+      }
+      $deleteable = 0;
+    }
     printLC("  -> Done destroying suicideCrypt volume\n", $VERBOSE);
     printLC("-> SuicideCrypt volume $mapper is destroyed and unrecoverable\n", 1);
   }
+}
+
+sub yN {
+
+  my $input;
+  my $valid = 0;
+
+  if ($CMDOPTIONS{y}) {
+    print "\n";
+    return 1;
+  }
+
+  while (!$valid) {
+    $input = <STDIN>;
+    chomp($input);
+    if ($input eq "y") {
+      return (1);
+      $valid = 1;
+    } elsif ($input eq "n") {
+      return (0);
+      $valid = 1;
+    } else {
+      print "Invalid selection, please try again (y/n):";
+    }
+  }
+}
+
+sub getContainer {
+  my $loop = shift;
+  my $result;
+  my @temp;
+  my $line;
+  my $container;
+
+  $result = `losetup --list`;
+  @temp = split /\n/, $result;
+  foreach $line (@temp) {
+    if ($line =~ $loop) {
+      @temp = ();
+      @temp = split (' ', $line); 
+      $container = $temp[5];
+      last;
+    }
+  }
+  return $container;
+}
+
+sub deleteCont {
+  
+  my $container = shift;
+
+  # TODO make sure tbis worked. 
+  printLC("  -> Deleting on disk container $container\n", $VERBOSE);
+  unlink($container);
+  printLC("  -> Done deleting container file\n", $VERBOSE);
+  return (1);
+
 }
 
 sub luksEraseHdr {
@@ -425,7 +524,7 @@ sub createKeyFile {
 }
 
 ### simple yes/no call.
-sub yN {
+sub yes {
 
   my $selection;
   my $valid;
@@ -476,7 +575,7 @@ sub printOptions {
   print "## Keyfile:              4096 bytes of random data\n";
   print "## Hash spec:            sha512\n";
   print "## Cipher:               aes256\n";
-  print "## Paranoid Mode:      ";
+  print "## Paranoid Mode:        ";
   if ($paranoid) {
     print "yes\n";
   } else { 
@@ -598,7 +697,6 @@ sub unlockCryptVol {
   # TODO make sure this worked
   printLC("  -> Success creating /dev/mapper/$cryptName\n", $VERBOSE);
   return(1);
-
 }
 
 sub formatCryptVol {
@@ -652,7 +750,8 @@ sub getParanoid {
     return $paranoid;
   }
   while (!$valid) {
-    print "\nDo you want to create this suicideCrypt volume in PARANOID mode?\nEnter '?' for info on Paranoid mode (y/n/?): ";
+    print "\n - [Paranoid Mode] -\n\n";
+    print "  - Create this PARANOID suicideCrypt volume (y/n/?): ";
     $selection = <STDIN>;
     chomp $selection;
     if ($selection eq "y") {
@@ -664,7 +763,7 @@ sub getParanoid {
     } elsif ($selection eq "?") {
       print "\n\n** Blah Blah on pranoid mode! ** \n\n";
     } else {
-      print "\n!! You have entered an invalid option, please try again !!\n";
+      print "** You have entered an invalid option, please try again **\n\n";
     }
   }
   return $paranoid;
@@ -677,14 +776,15 @@ sub mountPoint {
    my $mp = "";
 
   while (!$valid) {
-    print "\nPlease enter the location on the filesytem that you would like to mount the encrypted volume, eg /mnt: ";
+    print "\n - [Mount Point] -\n\n";
+    print "  - Enter the path the mount point for this volume e.g /mnt:  ";
     $selection = <STDIN>;
     chomp $selection;
     if ((-d $selection) && is_folder_empty($selection) ) {
       $mp = $selection;
       $valid = 1;
     } else { 
-      print "\n!! You have enterd an invlaid mount point, either the directory doesn't exist or isn't empty. Please try again !!\n";
+      print "\n**  You have enterd an invlaid mount point, either the directory doesn't exist or isn't empty. Please try again **\n\n";
     }
   }
   return $mp;
@@ -698,14 +798,15 @@ sub getDevice {
   my $device = "";
 
   while (!$valid) {
-    print "\nPlease enter the full path of the block device you wish to encrypt, ie. /dev/sdb, /dev/sdc1: ";
+    print "\n - [Block device to encrypt] -\n\n";
+    print "  - Enter path of the block device ie. /dev/sdb, /dev/sdc1: ";
     $selection = <STDIN>;
     chomp $selection;
     if (-e $selection) {
       $device = $selection;
       $valid = 1;
     } else { 
-      print "$selection is not a valid block device! Please re-enter a valid device\n";
+     print "\n** $selection is not a valid block device! Please re-enter a valid device **\n\n";
     }
   }
   return $device;
@@ -719,15 +820,15 @@ sub getLocation {
   
 
   while (!$valid) {
-    print "\n** NB: Please ensure there is enough space on the filesystem to hold the size container you specify **";
-    print "\nPlease enter the location on the local filesystem you would like to place the encrypted container file: ";
+    print "\n - [Location to save encrypted container] -\n\n";
+    print "  - Path to save encrypted container file: ";
     $selection = <STDIN>;
     chomp $selection;
     if (-d $selection) {
       $location = $selection;
       $valid = 1;
     } else {
-      print "This is not a valid location. Please enter a valid location on the local filesystem\n";
+      print "\n** This is not a valid location. Please enter a valid location on the local filesystem ** \n";
     }
   }
   return $location;
@@ -740,14 +841,15 @@ sub getSize {
   my $unit;
 
   while (!$valid) {
-    print "\nPlease enter the size of the container you wish to create in megabytes or gigabytes (e.g, 500m or 5g):";
+    print "\n - [Size of the encrypted container] -\n\n";
+    print "  - Size of the container in megabytes or gigabytes (e.g, 500m or 5g):";
     $selection = <STDIN>;
     chomp($selection);
     ($size, $unit) = isValidUnit($selection);
     if ($size) {
       $valid = 1;
     } else {
-      print "Invalid unit or size, please try again\n";
+      print "\n** Invalid unit or size, please try again ** \n";
     }
   }
   return($size, $unit);
@@ -774,7 +876,8 @@ sub getType {
   my $type;
 
   while (!$valid) {
-    print "Do you wish to create an encrypted (c)ontainer file? Or an encypted (b)lock device? (c/b): ";
+    print " - [Volume Type] -\n\n";
+    print "  - Create an encrypted (c)ontainer file? Or an encypted (b)lock device? (c/b): ";
     $selection = <STDIN>;
     chomp($selection);
     if ($selection eq "c") {
@@ -783,6 +886,8 @@ sub getType {
     } elsif ($selection eq "b") {
       $type = "b";
       $valid = 1;
+    } else {
+      print "\n** Invalid selection ** \n\n";
     }
   }
   return $type;
