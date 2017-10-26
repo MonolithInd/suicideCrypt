@@ -4,15 +4,18 @@ use warnings;
 use strict;
 use JSON;
 use Config::General;
+use Proc::Daemon;
+use Proc::PID::File;
 use Data::Dumper;
 use POE qw(Wheel::Run Filter::Reference Wheel::FollowTail);
 
-# requirements :  libpoe-perl, libconfig-general-perl, libio-pty-perl libjson-perl
+# requirements :  libpoe-perl, libconfig-general-perl, libio-pty-perl libjson-perl, libproc-daemon-perl, libproc-pid-file-perl
 
 my $conf = Config::General->new(
          -ConfigFile => "../../../etc/suicideCrypt/suicideCryptd.conf",
 );
 my $VERSION = 0.5;
+my $DAEMON = 1;
 my $DEBUG = 0;
 my %configH = $conf->getall;
 my $VERBOSE = $configH{verbose};
@@ -23,6 +26,10 @@ my %ALERTS;
 my $ALERTTEMP = 33;
 my @systemUsers = getSystemUsers();
 my @allowedUsers = getAllowedUsers();
+
+if ($DAEMON) {
+  daemonize();
+}
 
 print "\n *** Starting suicideCryptd version $VERSION *** \n\n" if $VERBOSE;
 print "-> Starting Moitoring Sessions...\n" if $VERBOSE;
@@ -61,6 +68,28 @@ POE::Session->create(
   },
 );
 
+# POE session to check for temp alarms and ram freezing events
+# Start a POE session to monitor lm-sensors for temperature events                                                                                                                                                                                                                  
+if ($configH{systemevents}{sensors}{enabled}) {
+  print "  -> Starting an lm-sensors monitor\n" if $VERBOSE;
+  POE::Session->create(
+    inline_states => {
+      _start => sub {
+        $_[KERNEL]->alias_set('sensorsMonitor');
+        $_[HEAP]->{next_alarm_time} = int(time()) + 1;
+        $_[KERNEL]->alarm(tick => $_[HEAP]->{next_alarm_time});
+      },
+      tick => sub {
+        monitor_sensors();
+ 
+        $_[HEAP]->{next_alarm_time} = $_[HEAP]->{next_alarm_time} + 1;
+        $_[KERNEL]->alarm(tick => $_[HEAP]->{next_alarm_time});
+      },
+    },
+  );
+}
+
+
 # POE session to run round looking for alerts.
 POE::Session->create(
   inline_states => {
@@ -96,20 +125,6 @@ POE::Session->create(
   },
 );
 
-# Start a POE session to monitor lm-sensors for temperature events
-if ($configH{systemevents}{sensors}{enabled}) {
-  print "  -> Starting an lm-sensors monitor\n" if $VERBOSE;
-  POE::Session->create(
-    inline_states => {
-      _start      => \&startsensors,
-      got_child_stdout   => \&got_child_stdout,
-      got_child_stderr => \&got_child_stderr,
-      got_child_close   => \&got_child_close,
-      got_sigchld   => \&got_sigchld,
-    }
-  );
-}
-
 # Start a POE session to monito udevadm for HW additions and removals. 
 if ($configH{systemevents}{udevadm}{enabled}) {
   print "  -> Starting a udevadm monitor\n" if $VERBOSE;
@@ -124,13 +139,41 @@ if ($configH{systemevents}{udevadm}{enabled}) {
   );
 }
 
-print "-> All configured monitors starts.\n" if $VERBOSE;
+print "-> All configured monitors started.\n\n" if $VERBOSE;
 
 # Start our POE Kernel.
 $poe_kernel->run();
 exit 0;
 
 #### Subs below here. 
+
+sub daemonize {
+  my $pid;
+
+  # did we get a stop command?
+  if (@ARGV && $ARGV[0] eq "stop") {
+    # we need to send a signal to the running process to tell it
+    # to quit
+    # get the pid file (in /var/run by default)
+    $pid = Proc::PID::File->running(name => "suicideCryptd");
+    unless ($pid) {
+      die "Not already running!"
+    }
+    # and send a signal to that process
+    kill(2,$pid);  # you may need a different signal for your system
+    print "Stop signal sent!\n";
+    exit;
+  }  
+  # fork into the background
+  # do this first because our process id will change
+  Proc::Daemon::Init;
+  # write the pid file, exiting if there's one there already.
+  # this pid file will automatically be deleted when this script
+  # exits.
+  if (Proc::PID::File->running(name => "suicideCryptd")) {
+    die "Already running!"
+  }  
+}
 
 sub begin_watchers {
   my $heap = $_[HEAP];
@@ -221,20 +264,6 @@ sub auth_got_record {
   return;
 }
 
-sub startsensors {
-  my ($kernel, $heap) = @_[KERNEL, HEAP];
-
-  $heap->{child} = POE::Wheel::Run->new(
-    Program => sub { monitor_sensors() },
-    StdioFilter  => POE::Filter::Line->new(),    # Child speaks in lines.
-    StderrFilter => POE::Filter::Line->new(),    # Child speaks in lines.
-    StdoutEvent  => "got_child_stdout",          # Child wrote to STDOUT.
-    StderrEvent  => "got_child_stderr",          # Child wrote to STDERR.
-    CloseEvent   => "got_child_close",           # Child stopped writing.
-  );
-  $kernel->sig_child($heap->{child}->PID, "got_sigchld");
-}
-
 sub startudevadm {
   my ($kernel, $heap) = @_[KERNEL, HEAP];
 
@@ -257,19 +286,16 @@ sub monitor_sensors {
   my $sensor;
   my $temp;
   
-  while (1) {  
-    $result = `sensors -u`;
-    @lines = split (/\n/, $result);
-      foreach $line (@lines) {
-        if ($line =~ /(temp\d*)_input: (\d*).\d*/) {
-	  ($sensor, $temp) = ($1, $2);
-          if ($temp <= $ALERTTEMP) {
-            print "sensors,$sensor,$temp\n";
-          }
-        }
-     }
-     sleep 1;
-   }
+  $result = `sensors -u`;
+  @lines = split (/\n/, $result);
+  foreach $line (@lines) {
+    if ($line =~ /(temp\d*)_input: (\d*).\d*/) {
+      ($sensor, $temp) = ($1, $2);
+      if ($temp <= $ALERTTEMP) {
+        $ALERTS{$sensor}{alert} = 1;
+      }
+    }
+  }
 } 
 
 # Deal with information the child wrote to its STDOUT.
@@ -280,12 +306,6 @@ sub got_child_stdout {
 
   if ($stdout =~ /^UDEV/) {
     processUDEV($stdout);
-  }
-  if ($stdout =~ /,/) { 
-    @values = split(/,/, $stdout);
-    if ($values[0] eq "sensors") {
-      $ALERTS{$values[1]}{alert} = 1;
-    }
   }
 }
 
