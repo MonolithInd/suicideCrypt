@@ -25,6 +25,8 @@
 
 use strict;
 use warnings;
+use Time::HiRes qw(time);
+use POSIX qw(strftime);
 use Getopt::Long qw(:config no_ignore_case);
 use Sys::Hostname;
 use JSON;
@@ -36,12 +38,14 @@ my $DEBUG = 0;
 my $VERBOSE = 0;
 my $VERSION = "0.5";
 my $HOST = hostname();
+my $KEYSIZE = 512;
 my $RAMDISK = "/tmp/suicideCryptRAMdisk";
 my $LOGFILE = "/var/log/suicideCrypt.log";
 my $LOG;
 my %CMDOPTIONS = ();
 my %USROPT;
-my $cryptID = randString();
+my $uuID = "00000000-0000-0000-0000-000000000000";
+# my $cryptID = randString();
 
 ### Begining of main program ###
 
@@ -125,9 +129,9 @@ sub new {
   my $volume;
 
   if ($paranoid) {
-    $cryptName = "suicideCrypt-PARANOID-$cryptID";
+    $cryptName = "suicideCrypt-PARANOID";
   } else {
-    $cryptName = "suicideCrypt-$cryptID";
+    $cryptName = "suicideCrypt";
   }
   print "\nWe are now ready to create your encrypted volume with the following options:\n\n";
   printOptions(%usropt); # show the user their choices for conformation before execution 
@@ -142,18 +146,30 @@ sub new {
     createTMPfs();
     createKeyFile();
     if ($usropt{'type'} eq "c") { 
-      createContFile("$usropt{'location'}/$cryptName.img", "$usropt{'size'}$usropt{'unit'}");
+      createContFile("$volume", "$usropt{'size'}$usropt{'unit'}");
     }
     setupCryptVol("$volume");
+    # I now have a valid LUKS device, lets pull the UUID and use that 
+    # as the unique identifier going forward.
+    $uuID = getUUID($volume);
+    $cryptName = $cryptName . "_$uuID";
+#    renameUUID($volume, $uuID);
+    if ($usropt{'type'} eq "c") {
+      renameUUID($volume, $uuID);
+      $volume = "$usropt{'location'}/$cryptName.img";
+    }
+    renameUUID("$RAMDISK/keyfile", $uuID);
     # If running paranoid mode, delete the header and key, otherwise copy the header to the 
     # ramdisk in case the user wishes to remount later.
-    if ($paranoid) { 
-      enableParanoid($cryptID);
+    if ($paranoid) {
+      unlockCryptVol("$cryptName", "$volume", $paranoid); 
+      luksEraseHdr("$volume");
+      enableParanoid($uuID);
     } else {
       backupLuksHdr("$volume");
+      luksEraseHdr("$volume"); 
+      unlockCryptVol("$cryptName", "$volume", $paranoid);
     }
-    luksEraseHdr("$volume");
-    unlockCryptVol("$cryptName", "$volume");
     formatCryptVol("$cryptName");
     mountCryptVol("$cryptName", "$usropt{'mountpoint'}");
 
@@ -162,6 +178,23 @@ sub new {
     printLC("-> Aborting create...\n", 1);
   }
 } 
+
+sub renameUUID {
+  my $file = shift;
+  my $newID = shift;
+  my $newfile;
+  my $temp;
+
+  if ($file =~ /img/) { 
+    $temp = (split(/\./, $file))[0];
+    $newfile = $temp . "_" . $newID . ".img";
+  } else { 
+    $newfile = "$file" . "_" . "$newID";
+  }
+
+  rename("$file", "$newfile");
+
+}
 
 # Collect and parse the Command line options
 sub getOptionsCL {
@@ -223,13 +256,13 @@ sub removeKey {
 	
   my $id = shift;
 
-  printLC("    -> Zeroing keyfile....\n", $VERBOSE);
-  zeroFile("$RAMDISK/keyfile-$id"); ## Lets overwrite it with Zeros before we unlink it. potential ram freezing.
+  printLC("    -> Zeroing keyfile $RAMDISK/keyfile_$id ...\n", $VERBOSE);
+  zeroFile("$RAMDISK/keyfile_$id"); ## Lets overwrite it with Zeros before we unlink it. potential ram freezing.
   sleep 0.5; # Lets sleep for a half second to make sure it writes to ram. Possibly no needed. To review.
-  printLC("    -> Done Zeroing keyfile.\n", $VERBOSE);
-  printLC("    -> Unlinking keyfile...\n", $VERBOSE);
-  unlink("$RAMDISK/keyfile-$id");
-  printLC("    -> Done unlinking LUKS keyfile.\n", $VERBOSE);
+  printLC("    -> Done Zeroing keyfile $RAMDISK/keyfile_$id.\n", $VERBOSE);
+  printLC("    -> Unlinking keyfile $RAMDISK/keyfile_$id ...\n", $VERBOSE);
+  unlink("$RAMDISK/keyfile_$id");
+  printLC("    -> Done unlinking LUKS keyfile $RAMDISK/keyfile_$id.\n", $VERBOSE);
   if (is_folder_empty($RAMDISK)) {
     printLC("     -> RAMDISK is empty, no more volumes, unmounting and deleting $RAMDISK\n", $VERBOSE);
     system("umount $RAMDISK");
@@ -242,13 +275,13 @@ sub removeHdr {
 
   my $id = shift; 
 
-  printLC("    -> Zeroing LUKS header file....\n", $VERBOSE);   
-  zeroFile("$RAMDISK/hdrfile-$id"); ## Lets overwrite it with Zeros before we unlink it. potential ram freezing.
+  printLC("    -> Zeroing LUKS header file $RAMDISK/hdrfile_$id ...\n", $VERBOSE);   
+  zeroFile("$RAMDISK/hdrfile_$id"); ## Lets overwrite it with Zeros before we unlink it. potential ram freezing.
   sleep 0.5; # Lets sleep for a half second to make sure it writes to ram. Possibly no needed. To review. 
-  printLC("    -> Done Zeroing header file.\n", $VERBOSE); 
-  printLC("    -> Unlinking header file...\n", $VERBOSE);
-  unlink("$RAMDISK/hdrfile-$id");
-  printLC("    -> Done unlinking LUKS header.\n", $VERBOSE);
+  printLC("    -> Done Zeroing header file $RAMDISK/hdrfile_$id .\n", $VERBOSE); 
+  printLC("    -> Unlinking header file $RAMDISK/hdrfile_$id ...\n", $VERBOSE);
+  unlink("$RAMDISK/hdrfile_$id");
+  printLC("    -> Done unlinking LUKS header $RAMDISK/hdrfile_$id.\n", $VERBOSE);
   if (is_folder_empty($RAMDISK)) {
     printLC("    -> RAMDISK is empty, no more volumes, unmounting and deleting $RAMDISK\n", $VERBOSE);
     system("umount $RAMDISK");
@@ -342,7 +375,7 @@ sub destroyVolumes {
 
   foreach $vol (@destroyVols) {
     $mapper = $allVols{$vol}{'mapper'};
-    @temp = split('-', $mapper);
+    @temp = split('_', $mapper);
     $id = $temp[1];
     printLC("-> Destroying sucideCrypt volume $mapper\n", $VERBOSE);
     # Lets get rid of the key and header file (if they exist) first, the faster
@@ -490,7 +523,7 @@ sub getMounted {
   $dev = from_json($cmdOutput, {utf8 => 1});
 
   foreach my $volume (@{ $dev->{'blockdevices'} }) {
-    if ($volume->{name} =~ "suicideCrypt-") {
+    if ($volume->{name} =~ "suicideCrypt") {
       $vols{$count}{'mapper'} = $volume->{name};
       $vols{$count}{'mountpoint'} = $volume->{mountpoint};
       foreach my $child (@{ $volume->{'children'} }) {
@@ -502,7 +535,7 @@ sub getMounted {
   return %vols;
 }
 
-### Create an randomised 4096 byte keyfile to encrypt the volumes with important for suicideCrypt as 
+### Create an randomised X byte keyfile to encrypt the volumes with important for suicideCrypt as 
 ### the user never knows the content of this key. Once it is deleted in the audit trail. The user 
 ### no longer has the ability to decrypt this volume. We use /dev/urandom here. But for true 
 ### cryptographic strength the user should use a source of true random data such as a hardware
@@ -512,11 +545,11 @@ sub createKeyFile {
   
   my $cmd; 
   if ($CMDOPTIONS{r}) {
-    $cmd = "dd if=/dev/random of=$RAMDISK/keyfile-$cryptID bs=4096 count=4 >/dev/null 2>&1";
+    $cmd = "dd if=/dev/random of=$RAMDISK/keyfile bs=1 count=$KEYSIZE >/dev/null 2>&1";
   } else {
-    $cmd = "dd if=/dev/urandom of=$RAMDISK/keyfile-$cryptID bs=4096 count=4 >/dev/null 2>&1";
+    $cmd = "dd if=/dev/urandom of=$RAMDISK/keyfile bs=1 count=$KEYSIZE >/dev/null 2>&1";
   }
-  printLC("  -> Creating the random keyfile for the volume: $RAMDISK/keyfile-$cryptID\n", $VERBOSE);
+  printLC("  -> Creating the random $KEYSIZE byte keyfile for the volume: $RAMDISK/keyfile\n", $VERBOSE);
   system ($cmd);
   printLC("  -> Success creating keyfile\n", $VERBOSE);
   return (1);
@@ -554,33 +587,36 @@ sub printOptions {
   my $mountpoint = $options{'mountpoint'};
   my $device;
 
+
+    print "#=====================================#\n";
   if ($type eq "c") {
     $location = $options{'location'};
     $size = $options{'size'} . $options{'unit'};
-    print "## Type:                 Container\n";
-    print "## Container Location:   $location\n";
-    print "## Size:                 $size\n";
+    print "| Type:                 Container     |\n";
+    printf "| Container Location:   %-14s|\n", $location;
+    printf "| Size:                 %-14s|\n", $size;
   } elsif ($type eq "b") {
     $device = $options{'device'};
-    print "## Type:                 Block Device\n";
-    print "## Block Device:         $device\n";
+    print "| Type:                 Block Device  |\n";
+    printf "| Block Device:         %-14s|\n", $device;
   }
-  print "## Mount point:          $mountpoint\n";
-  print "## Source of randomness: ";
+  printf "| Mount point:          %-14s|\n", $mountpoint;
+  print "| Source of entropy:    ";
   if ($CMDOPTIONS{r}) { 
-    print "/dev/random\n";
-  } else {
-    print "/dev/urandom\n";
-  } 
-  print "## Keyfile:              4096 bytes of random data\n";
-  print "## Hash spec:            sha512\n";
-  print "## Cipher:               aes256\n";
-  print "## Paranoid Mode:        ";
-  if ($paranoid) {
-    print "yes\n";
+    print "/dev/random   |\n";
   } else { 
-    print "no\n";
+    print "/dev/urandom  |\n";
+  } 
+  print "| Keyfile:              $KEYSIZE bytes     |\n";
+  print "| Hash spec:            sha512        |\n";
+  print "| Cipher:               aes256        |\n";
+  print "| Paranoid Mode:        ";
+  if ($paranoid) {
+    print "yes           |\n";
+  } else { 
+    print "no            |\n";
   }
+    print "#=====================================#\n"; 
 }
 
 sub createTMPfs {
@@ -643,7 +679,7 @@ sub createContFile {
   } else { 
     printLC("  -> Failed to create blank container file! Please check permissions\n", 1);
     printLC("  -> Cleaning up created header...\n", 1);
-    removeKey($cryptID);
+    removeKey($uuID);
     printLC("-> Creating the requested volume FAILED!\n", 1);
     exit(0);
   }
@@ -651,7 +687,7 @@ sub createContFile {
 
 sub setupCryptVol {
   my $volume = shift;
-  my $keyfile = "$RAMDISK/keyfile-$cryptID";
+  my $keyfile = "$RAMDISK/keyfile";
   my $cryptSetupCmd;
 
   if ($CMDOPTIONS{r}) {
@@ -671,13 +707,13 @@ sub enableParanoid {
 
   printLC("  -> Paranoid mode selected, Erasing all keys from header and deleting LUKS keyfile.\n", 1);
   printLC("  -> !! After this point, volume will be unrecoverable after reboot/unmount/destroy !!\n", 1);
-  removeKey($cryptID);
+  removeKey($id);
   return(1);
 }
 
 sub backupLuksHdr {
   my $volume = shift;
-  my $hdrfile = "$RAMDISK/hdrfile-$cryptID";
+  my $hdrfile = "$RAMDISK/hdrfile_$uuID";
   my $cryptHdrBackupCmd = "cryptsetup luksHeaderBackup $volume --header-backup-file $hdrfile";
 
   printLC("  -> Backing up LUKS header to ramdisk...\n", $VERBOSE);
@@ -690,7 +726,13 @@ sub backupLuksHdr {
 sub unlockCryptVol {
   my $cryptName = shift;
   my $filename = shift;
-  my $cryptOpenCmd = "cryptsetup luksOpen $filename $cryptName --key-file $RAMDISK/keyfile-$cryptID --header=$RAMDISK/hdrfile-$cryptID";
+  my $paranoid = shift;
+  my $cryptOpenCmd;
+  if ($paranoid) {
+    $cryptOpenCmd = "cryptsetup luksOpen $filename $cryptName --key-file $RAMDISK/keyfile_$uuID";
+  } else {
+    $cryptOpenCmd = "cryptsetup luksOpen $filename $cryptName --key-file $RAMDISK/keyfile_$uuID --header=$RAMDISK/hdrfile_$uuID";
+  }
 
   printLC("  -> Opening the Encrypted container and creating /dev/mapper link...\n", $VERBOSE);
   system ($cryptOpenCmd);
@@ -894,15 +936,15 @@ sub getType {
 }
 
 # Generates a random 16 digit string to concatonate to the name of a suicideCrypt volume to prevent collision of multiple volumes.
-sub randString {
-
-  my @chars;
-  my $string;
-
-  @chars = ("A".."Z", "a".."z", "0".."9");
-  $string .= $chars[rand @chars] for 1..16;
-  return $string;
-}
+#sub randString {
+#
+#  my @chars;
+#  my $string;
+#
+# @chars = ("A".."Z", "a".."z", "0".."9");
+#  $string .= $chars[rand @chars] for 1..16;
+#  return $string;
+#}
 
 sub is_folder_empty {
   my $dirname = shift;
@@ -952,7 +994,11 @@ sub printLC {
   my $show = shift;
   my @temp;
   my $logmsg;
-  my $timestamp = scalar localtime();  
+  my $t = time;
+  my $timestamp = strftime "%F %T", localtime $t;
+
+
+  $timestamp .= sprintf ".%03d", ($t-int($t))*1000; # without rounding
 
   @temp = split('> ', $msg);
   $logmsg = $temp[1];
@@ -969,6 +1015,25 @@ sub printVer {
   print "\nsucicideCrypt version $VERSION\n\n";
 
 }
+
+sub getUUID {
+  my $device = shift;
+  my $luksCmd = "cryptsetup luksDump $device";
+  my $result;
+  my @temp;
+  my $line;
+  my $uuid;
+
+  $result = `$luksCmd`;
+  @temp = split(/\n/, $result);
+  foreach $line (@temp) {
+    if ($line =~ /^UUID/) {
+      $uuid = (split(' ', $line))[1];
+    }
+  }
+  return $uuid;
+}
+
 
 ### Kicks off the logger for full execution trail
 sub logStart {

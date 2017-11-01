@@ -15,15 +15,15 @@ my $conf = Config::General->new(
          -ConfigFile => "../../../etc/suicideCrypt/suicideCryptd.conf",
 );
 my $VERSION = 0.5;
-my $DAEMON = 1;
-my $DEBUG = 0;
+my $DAEMON = 0;
+my $DEBUG = 2;
 my %configH = $conf->getall;
 my $VERBOSE = $configH{verbose};
 my @logsToWatch;
 my %VOLUMES;
 my %MANUALVOLUMES;
 my %ALERTS;
-my $ALERTTEMP = 33;
+my $ALERTTEMP = 32;
 my @systemUsers = getSystemUsers();
 my @allowedUsers = getAllowedUsers();
 
@@ -109,12 +109,14 @@ POE::Session->create(
           if ($key =~ /temp/) {
             print "**\\------> We have detected a potential RAM chill event from lm-sensors: $key!\n" if $VERBOSE;
           } elsif ($key =~ /udev/) {
-	    print "**\\------> We have detected a UDEV hardware change event $key!\n" if $VERBOSE;
+	          print "**\\------> We have detected a UDEV hardware change event $key!\n" if $VERBOSE;
           } elsif ($key =~ /ossec/) {
             print "**\\------> We have detected a ossec alert event $key!\n" if $VERBOSE;
           } elsif ($key =~ /auth/) { 
             print "**\\------> We have detected an auth log alert event $key!\n" if $VERBOSE;
           }
+          print "\n";
+          alertReact();
           # reset the alert; 
           $ALERTS{$key}{alert} = 0;
         }
@@ -421,7 +423,13 @@ sub getMounted {
 
   foreach my $volume (@{ $dev->{'blockdevices'} }) {
     $mountpoint = $volume->{mountpoint};
-    if ($volume->{name} =~ "suicideCrypt-") {
+    # sometimes we get here while a SC drive is being made, as such it's not
+    # mounted yet and it breaks output. Skip it this time, we'll get it the 
+    # next time when creation is finished. 
+    if (!$mountpoint) {
+      next;
+    }
+    if ($volume->{name} =~ "suicideCrypt") {
       $vols{$mountpoint}{'mapper'} = $volume->{name};
       $vols{$mountpoint}{'type'} = "suicideCrypt";
       $vols{$mountpoint}{'mountpoint'} = $volume->{mountpoint};
@@ -433,6 +441,29 @@ sub getMounted {
   return %vols;
 }
 
+sub alertReact {
+  my $drive;
+  my $unmountCmd;
+  my $destroyCmd;
+  
+  foreach $drive (keys (%VOLUMES)) {
+    print "Reacting for drive $drive\n";
+    if ($configH{mounts}{$drive}) {
+      print "Found a more specific react for $drive, do it's thing\n";
+      if ($configH{mounts}{$drive}{unmountcmd}) {
+        print "unmounting $drive using : $configH{mounts}{$drive}{unmountcmd}\n";
+        $unmountCmd = $configH{mounts}{$drive}{unmountcmd} . " $drive";
+        system("$unmountCmd");
+      } 
+    } else {
+      print "Doing the default thing\n";
+    }
+  } 
+
+
+
+}
+
 sub updateVols {
   my %volhash = %{$_[0]};
   my $key;
@@ -441,10 +472,10 @@ sub updateVols {
   # Check if the drives found are being monitored and if not start watching them.
   foreach $key (keys(%volhash)) {
     if (!$VOLUMES{$key}) {
-      print "  --> New suicideCrypt volume detected, inserting into monitoring hash\n" if ($DEBUG >= 2);
+      print "  --> New suicideCrypt volume detected $key, inserting into monitoring hash\n" if ($DEBUG >= 2);
       $VOLUMES{$key} = $volhash{$key};
     } else {
-      print "  --> Returned Volume already being watched, ignoring and continuing\n" if ($DEBUG >= 2);
+#      print "  --> Returned Volume already being watched, ignoring and continuing\n" if ($DEBUG >= 2);
     }
   }
   # find drives that have gone away and stop watching them.
@@ -454,7 +485,7 @@ sub updateVols {
     } else {
       # Volume has gone away since we last enumerated. Since we didn't delete it,
       # clearly someone manually removed it
-      print "  --> Drive removed since last check, stopping monitoring\n" if ($DEBUG >= 2);
+      print "  --> Drive removed since last check $key, stopping monitoring\n" if ($DEBUG >= 2);
       delete $VOLUMES{$key};
     }
   }
