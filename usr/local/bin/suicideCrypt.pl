@@ -86,12 +86,22 @@ if (defined $CMDOPTIONS{h}) {
   exit (1);
 } elsif (defined $CMDOPTIONS{d}) {
   logStart("Destroy");
-  destroy($CMDOPTIONS{d});
+  destroy_unmount($CMDOPTIONS{d});
   logClose();
   exit (1);
 } elsif (defined $CMDOPTIONS{D}) {
   logStart("DestroyAll");
-  destroyAll();
+  destroy_unmount_All();
+  logClose();
+  exit(1);
+} elsif (defined $CMDOPTIONS{u}) {
+  logStart("UnMount");
+  destroy_unmount($CMDOPTIONS{d});
+  logClose();
+  exit (1);
+} elsif (defined $CMDOPTIONS{U}) {
+  logStart("UnMountAll");
+  destroy_unmount_All();
   logClose();
   exit(1);
 }
@@ -113,6 +123,8 @@ sub parseOptions {
             "v|verbose",
             "d|destroy:s",
             "D|destroyall",
+            "u|unmount",
+            "U|unmountall",
             "p|paranoid",
             "r|random",
             "y|yes",
@@ -293,7 +305,7 @@ sub removeHdr {
 
 ### destroy a suicideCrypt volume, can take a mount point, mapper refrence,
 ### or if nothing given lets the user select from a list.
-sub destroy {
+sub destroy_unmount {
 
   my $volume = shift;
   my $select;
@@ -301,17 +313,24 @@ sub destroy {
   my $valid = 0;
   my @volNum = keys(%allVols);
   my $val;
-  my @destroyVol;
+  my @destroyunmountVol;
+  my $action;
 
+  if ($CMDOPTIONS{d} || $CMDOPTIONS{D}) {
+    $action = "destroy";
+  } elsif ($CMDOPTIONS{u} || $CMDOPTIONS{U}) {
+    $action = "unmount";
+  }
   if (!@volNum) {
     printLC("\n-> No suicideCrypt volumes detected mounted on this host, doing nothing\n\n", 1);
     return (0);
   }
   if (!$volume) {
-    print "\nNo volume specified, Please choose which mounted volume to destroy from this list:\n";
+    print "\nNo volume specified, Please choose which mounted volume to $action from this list:\n";
+    
     listsuicideCryptVol();
     while (!$valid) {
-      print "Enter number of volume you wish to destroy: ";
+      print "Enter number of volume you wish to $action: ";
       $select = <STDIN>;
       chomp($select);
       foreach $val (@volNum) {
@@ -320,8 +339,8 @@ sub destroy {
         } 
       }
       if ($valid) {
-        push @destroyVol, $select;
-        destroyVolumes(@destroyVol);
+        push @destroyunmountVol, $select;
+        destroy_unmount_Volumes(@destroyunmountVol);
       } else {
         print "Invalid selection, please select an existing volume from the list\n"; 
       }
@@ -329,8 +348,8 @@ sub destroy {
   } else {
     foreach $val (@volNum) {
       if (($volume =~ $allVols{$val}{'mapper'}) || ($volume =~ $allVols{$val}{'mountpoint'})) {
-        push @destroyVol, $val;
-        destroyVolumes(@destroyVol);
+        push @destroyunmountVol, $val;
+        destroy_unmount_Volumes(@destroyunmountVol);
         exit(1);
       }
     }
@@ -341,21 +360,29 @@ sub destroy {
 ### Destroy all suicideCrypt drives that the script can detect. If you've unmounted a drive manually
 ### then you may be screwed as this will not detect the drive and as such not delete and key or 
 ### header files in ramdisk. Don't do that. 
-sub destroyAll {
+sub destroy_unmount_All {
 
   my %allVols = getMounted();
   my @volNum = keys(%allVols);  
+  my $action;
+
+  if ($CMDOPTIONS{d} || $CMDOPTIONS{D}) {
+    $action = "destroy";
+  } elsif ($CMDOPTIONS{u} || $CMDOPTIONS{U}) {
+    $action = "unmount";
+  }
 
   if (!@volNum) {
     printLC ("\n-> No suicideCrypt volumes detected mounted on this host, doing nothing\n\n", 1);
     return (0);
     exit(1);
   } 
-  print "\nYou have chosen to destroy ALL detectable mounted suicideCrypt volumes on this host!\n";
+  print "\nYou have chosen to $action ALL detectable mounted suicideCrypt volumes on this host!\n";
+  $action = $action . "ing";
   if (yes()) {
-    printLC("\n-> Destroying all detectable mounted suicideCrypt Volumes\n", 1);
-    destroyVolumes(@volNum);
-    printLC("-> Done Destroying All Volumes\n", 1);
+    printLC("\n-> $action all detectable mounted suicideCrypt volumes\n", 1);
+    destroy_unmount_Volumes(@volNum);
+    printLC("-> Done $action all volumes\n", 1);
   } else { 
     printLC("-> Aborted!\n", 1);
   }
@@ -363,35 +390,44 @@ sub destroyAll {
 }
 
 ### Sub that actually takes a list of volumes and deletes them.
-sub destroyVolumes {
+sub destroy_unmount_Volumes {
 
-  my @destroyVols = @_;
+  my @destroyunmountVols = @_;
   my %allVols = getMounted();
   my $vol;
   my @temp;
   my $mapper;
   my $id;
   my $deleteable = 0;
+  my $action;
 
-  foreach $vol (@destroyVols) {
+  if ($CMDOPTIONS{d} || $CMDOPTIONS{D}) {
+    $action = "destroying";
+  } elsif ($CMDOPTIONS{u} || $CMDOPTIONS{U}) {
+    $action = "unmounting";
+  }
+
+  foreach $vol (@destroyunmountVols) {
     $mapper = $allVols{$vol}{'mapper'};
     @temp = split('_', $mapper);
     $id = $temp[1];
-    printLC("-> Destroying sucideCrypt volume $mapper\n", $VERBOSE);
-    # Lets get rid of the key and header file (if they exist) first, the faster
-    # we get rid of these the faster the volume is destroyed.
-    if (!($mapper =~ m/PARANOID/)) {
-      printLC("  -> Deleting keyfiles and header files from $RAMDISK\n", $VERBOSE);
-      removeKey($id);
-      removeHdr($id);
-    } else {
-      printLC("  -> Paranoid mode volume, no headers or keyfiles to delete\n", $VERBOSE);
-    }
-    # Lets wipe the on disk header again, just in case it wasn't done during creation.
-    luksEraseHdr($allVols{$vol}{'blkdev'});
-    # Grab the file location before we unmount it and can't get that info anymore.
-    if ($allVols{$vol}{'blkdev'} =~ /loop/) {
-      $deleteable = getContainer($allVols{$vol}{'blkdev'});
+    if ($CMDOPTIONS{d} || $CMDOPTIONS{D}) {
+      printLC("-> Destroying sucideCrypt volume $mapper\n", $VERBOSE);
+      # Lets get rid of the key and header file (if they exist) first, the faster
+      # we get rid of these the faster the volume is destroyed.
+      if (!($mapper =~ m/PARANOID/)) {
+        printLC("  -> Deleting keyfiles and header files from $RAMDISK\n", $VERBOSE);
+        removeKey($id);
+        removeHdr($id);
+      } else {
+        printLC("  -> Paranoid mode volume, no headers or keyfiles to delete\n", $VERBOSE);
+      }
+      # Lets wipe the on disk header again, just in case it wasn't done during creation.
+      luksEraseHdr($allVols{$vol}{'blkdev'});
+      # Grab the file location before we unmount it and can't get that info anymore.
+      if ($allVols{$vol}{'blkdev'} =~ /loop/) {
+        $deleteable = getContainer($allVols{$vol}{'blkdev'});
+      }
     }
     printLC("  -> Umounting $allVols{$vol}{'mountpoint'}\n", $VERBOSE);
     system ("umount $mapper");
@@ -399,19 +435,23 @@ sub destroyVolumes {
     printLC("  -> Closing LUKS Crypt volume $mapper\n", $VERBOSE);
     system("cryptsetup close $mapper");
     printLC("  -> Done closing LUKS Volume $mapper\n", $VERBOSE);
-    if ($deleteable) {
-      if ($CMDOPTIONS{y}) {
-        deleteCont($deleteable);
-      } else {
-        print "  -> This volume was a mounted container, do you want to delete the container file? (y/n):";
-        if (yN()) {
+    if ($CMDOPTIONS{d} || $CMDOPTIONS{D}) {
+      if ($deleteable) {
+        if ($CMDOPTIONS{y}) {
           deleteCont($deleteable);
+        } else {
+          print "  -> This volume was a mounted container, do you want to delete the container file? (y/n):";
+          if (yN()) {
+            deleteCont($deleteable);
+          }
         }
+        $deleteable = 0;
       }
-      $deleteable = 0;
     }
-    printLC("  -> Done destroying suicideCrypt volume\n", $VERBOSE);
-    printLC("-> SuicideCrypt volume $mapper is destroyed and unrecoverable\n", 1);
+    printLC("  -> Done $action suicideCrypt volume\n", $VERBOSE);
+    if ($CMDOPTIONS{d} || $CMDOPTIONS{D}) {
+      printLC("-> SuicideCrypt volume $mapper is destroyed and unrecoverable\n", 1);
+    }
   }
 }
 
@@ -980,6 +1020,8 @@ sub printHelp {
   print "-l : List all suicideCrypt created volumes\n";
   print "-d <volume, or leave blank for list> : Destroy an encrypted volume.\n";
   print "-D : Destroy all detectable suicideCrypt volumes on this host.\n";
+  print "-u <volume, or leave blank for list> : Unmount an encrypted volume without destroying keyfile\n";
+  print "-U : unmount all detectable suicideCrypt volumes on this host.\n";
   print "-p : default to paranoid mode in all volume creations.\n";
   print "-r : Use /dev/random instead of /dev/urandom for all random number collection. WARNING, can significantly slow down volume creation\n";
   print "-y : assume \"yes\" to all destroy/create confirmations. WARNING: You can delete a lot of data this way!\n";
