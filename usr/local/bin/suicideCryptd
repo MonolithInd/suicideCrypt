@@ -21,6 +21,8 @@ my %configH = $conf->getall;
 my $VERBOSE = $configH{verbose};
 my @logsToWatch;
 my %VOLUMES;
+my @PLUGINS;
+my $plugin;
 my %MANUALVOLUMES;
 my %ALERTS;
 my $ALERTTEMP = 32;
@@ -30,6 +32,9 @@ my @allowedUsers = getAllowedUsers();
 if ($DAEMON) {
   daemonize();
 }
+
+# scan for any enabled plugins
+@PLUGINS = getPlugins();
 
 print "\n *** Starting suicideCryptd version $VERSION *** \n\n" if $VERBOSE;
 print "-> Starting Moitoring Sessions...\n" if $VERBOSE;
@@ -89,6 +94,32 @@ if ($configH{systemevents}{sensors}{enabled}) {
   );
 }
 
+foreach $plugin (@PLUGINS) {
+
+  my $pluginName = (split('/', $plugin))[-1]  ;
+  print "  -> Starting an plugin monitor for $pluginName\n" if $VERBOSE;
+  POE::Session->create(
+    inline_states => {
+      _start => sub {
+        $_[KERNEL]->alias_set("$pluginName");
+        $_[HEAP]->{next_alarm_time} = int(time()) + 1;
+        $_[KERNEL]->alarm(tick => $_[HEAP]->{next_alarm_time});
+      },
+      tick => sub {
+        my $response = `$plugin`;
+	if ($response ne "OK") {
+          $ALERTS{$pluginName}{alert} = 1;
+          $ALERTS{$pluginName}{message} = "Hey there! ";
+        }
+#	print "$response\n";
+
+        $_[HEAP]->{next_alarm_time} = $_[HEAP]->{next_alarm_time} + 1;
+        $_[KERNEL]->alarm(tick => $_[HEAP]->{next_alarm_time});
+      },
+    },
+  );
+}
+
 
 # POE session to run round looking for alerts.
 POE::Session->create(
@@ -102,22 +133,26 @@ POE::Session->create(
       my $key;
       my $name;
 
-
+    
       foreach $key (keys %ALERTS) {
         if ($ALERTS{$key}{alert}) {
-          print "\n\n*\\ Alert!\n" if $VERBOSE;
-          if ($key =~ /temp/) {
-            print "**\\------> We have detected a potential RAM chill event from lm-sensors: $key!\n" if $VERBOSE;
-          } elsif ($key =~ /udev/) {
-	          print "**\\------> We have detected a UDEV hardware change event $key!\n" if $VERBOSE;
-          } elsif ($key =~ /ossec/) {
-            print "**\\------> We have detected a ossec alert event $key!\n" if $VERBOSE;
-          } elsif ($key =~ /auth/) { 
-            print "**\\------> We have detected an auth log alert event $key!\n" if $VERBOSE;
+          if (%VOLUMES) { 
+            print "\n\n*\\ Alert!\n" if $VERBOSE;
+            if ($key =~ /temp/) {
+              print "**\\------> We have detected a potential RAM chill event from lm-sensors: $key!\n" if $VERBOSE;
+            } elsif ($key =~ /udev/) {
+	            print "**\\------> We have detected a UDEV hardware change event $key!\n" if $VERBOSE;
+            } elsif ($key =~ /ossec/) {
+              print "**\\------> We have detected a ossec alert event $key!\n" if $VERBOSE;
+            } elsif ($key =~ /auth/) { 
+              print "**\\------> We have detected an auth log alert event $key!\n" if $VERBOSE;
+            } else {
+              print "**\\------> We have detected a plugin alert event from $key!\n" if $VERBOSE;
+            }
+            print "\n";
+            alertReact();
+            # reset the alert; 
           }
-          print "\n";
-          alertReact();
-          # reset the alert; 
           $ALERTS{$key}{alert} = 0;
         }
       }
@@ -445,23 +480,56 @@ sub alertReact {
   my $drive;
   my $unmountCmd;
   my $destroyCmd;
+  my $defaultCmd;
   
   foreach $drive (keys (%VOLUMES)) {
-    print "Reacting for drive $drive\n";
+    print "Reacting for volume $drive\n";
     if ($configH{mounts}{$drive}) {
       print "Found a more specific react for $drive, do it's thing\n";
       if ($configH{mounts}{$drive}{unmountcmd}) {
         print "unmounting $drive using : $configH{mounts}{$drive}{unmountcmd}\n";
         $unmountCmd = $configH{mounts}{$drive}{unmountcmd} . " $drive";
         system("$unmountCmd");
-      } 
+        delete $VOLUMES{$drive};
+      } elsif ($configH{mounts}{$drive}{destroycmd}) {
+        print "destroying $drive using : $configH{mounts}{$drive}{destroycmd}\n";
+        $destroyCmd = $configH{mounts}{$drive}{destroycmd} . " $drive";
+        system("$destroyCmd");
+        delete $VOLUMES{$drive};
+      } else { 
+        print "No special action specified performing default action\n";
+        if ($configH{defaultresponse} eq "destroy") {
+          $defaultCmd = $configH{destroycmd};
+        } else {
+          $defaultCmd = $configH{unmountcmd};
+        }
+        $defaultCmd = $defaultCmd . " $drive";
+        system("$defaultCmd");
+        delete $VOLUMES{$drive};
+      }
     } else {
-      print "Doing the default thing\n";
+      print "Performing default action: $configH{defaultresponse}\n";
+      if ($configH{defaultresponse} eq "destroy") {
+        $defaultCmd = $configH{destroycmd};
+      } else {
+        $defaultCmd = $configH{unmountcmd};
+      }
+      $defaultCmd = $defaultCmd . " $drive";
+      system("$defaultCmd");
+      delete $VOLUMES{$drive};
     }
   } 
+}
 
-
-
+sub getPlugins {
+  my @plugins;
+  my $dir = "../../../etc/suicideCrypt/plugins/";
+  
+#  opendir(BIN, $dir) or die "Can't open plugins dir: $dir: $!";
+#  @plugins = readdir BIN;
+  @plugins = glob( $dir . '/*' );
+  print "read in plugins: @plugins\n";
+  return @plugins;
 }
 
 sub updateVols {

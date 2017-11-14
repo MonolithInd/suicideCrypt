@@ -96,7 +96,7 @@ if (defined $CMDOPTIONS{h}) {
   exit(1);
 } elsif (defined $CMDOPTIONS{u}) {
   logStart("UnMount");
-  destroy_unmount($CMDOPTIONS{d});
+  destroy_unmount($CMDOPTIONS{u});
   logClose();
   exit (1);
 } elsif (defined $CMDOPTIONS{U}) {
@@ -104,6 +104,16 @@ if (defined $CMDOPTIONS{h}) {
   destroy_unmount_All();
   logClose();
   exit(1);
+} elsif (defined $CMDOPTIONS{a}) {
+  logStart("Attach");
+  attach_volume();
+  logClose();
+  exit(1);
+} elsif (defined $CMDOPTIONS{i}) {
+  logStart("Initalise");
+  createTMPfs();
+  logClose();
+  exit (1);
 }
 
 printHelp();
@@ -123,8 +133,10 @@ sub parseOptions {
             "v|verbose",
             "d|destroy:s",
             "D|destroyall",
-            "u|unmount",
+            "u|unmount:s",
             "U|unmountall",
+            "a|attach=s",
+            "i|initalise",
             "p|paranoid",
             "r|random",
             "y|yes",
@@ -302,6 +314,42 @@ sub removeHdr {
   } 
 }
 
+sub attach_volume {
+	my $volume = $CMDOPTIONS{a};
+  my $mountPoint;
+  my $luksUUIDCmd = "cryptsetup luksUUID";
+  my $cryptName;
+
+  if (!$CMDOPTIONS{a} || !$CMDOPTIONS{m}) {
+    print "You need to enter both a valid suicideCrypt device and mountpoint for the volume\n";
+    return(0);
+  }
+  $mountPoint = $CMDOPTIONS{m};
+  unless ((-d $mountPoint) && is_folder_empty($mountPoint) ) {
+    print "Mount point $mountPoint is not valid, or is no empty, please try a different mountpoint\n";
+    return(0);
+  }
+  $uuID = `$luksUUIDCmd $volume`;
+  chomp $uuID;
+  $cryptName = "suicideCrypt_$uuID";
+  if (!$uuID) {
+    print "Could not get UUID from $volume, is this a valid SuicideCrypt volume?\n";
+    return (0);
+  }
+  # lets check if the hdr and key files are in the memory store
+  if (!(-d $RAMDISK)) {
+    print "suicideCrypt ramdisk not mounted, use suicidCrypt.pl -i to initialise it then copy hdr and keyfiles there\n";
+    return (0);
+  }
+  if (!(-e "$RAMDISK/hdrfile_$uuID") || !(-e "$RAMDISK/keyfile_$uuID")) {
+    print "Could not find matching header or keyfile files in ramdisk for defined volume, please copy them to $RAMDISK\n";
+    return(0);
+  }
+  unlockCryptVol($cryptName, $volume, 0);
+  mountCryptVol($cryptName, $mountPoint);
+  print "Sucessfully attached $volume on $mountPoint\n";
+  return (1);
+}
 
 ### destroy a suicideCrypt volume, can take a mount point, mapper refrence,
 ### or if nothing given lets the user select from a list.
@@ -316,9 +364,9 @@ sub destroy_unmount {
   my @destroyunmountVol;
   my $action;
 
-  if ($CMDOPTIONS{d} || $CMDOPTIONS{D}) {
+  if ((defined $CMDOPTIONS{d}) || (defined $CMDOPTIONS{D})) {
     $action = "destroy";
-  } elsif ($CMDOPTIONS{u} || $CMDOPTIONS{U}) {
+  } elsif ((defined $CMDOPTIONS{u}) || (defined $CMDOPTIONS{U})) {
     $action = "unmount";
   }
   if (!@volNum) {
@@ -401,9 +449,9 @@ sub destroy_unmount_Volumes {
   my $deleteable = 0;
   my $action;
 
-  if ($CMDOPTIONS{d} || $CMDOPTIONS{D}) {
+  if ((defined $CMDOPTIONS{d}) || (defined $CMDOPTIONS{D})) {
     $action = "destroying";
-  } elsif ($CMDOPTIONS{u} || $CMDOPTIONS{U}) {
+  } elsif ((defined $CMDOPTIONS{u}) || (defined $CMDOPTIONS{U})) {
     $action = "unmounting";
   }
 
@@ -411,7 +459,7 @@ sub destroy_unmount_Volumes {
     $mapper = $allVols{$vol}{'mapper'};
     @temp = split('_', $mapper);
     $id = $temp[1];
-    if ($CMDOPTIONS{d} || $CMDOPTIONS{D}) {
+    if ((defined $CMDOPTIONS{d}) || (defined $CMDOPTIONS{D})) {
       printLC("-> Destroying sucideCrypt volume $mapper\n", $VERBOSE);
       # Lets get rid of the key and header file (if they exist) first, the faster
       # we get rid of these the faster the volume is destroyed.
@@ -435,7 +483,7 @@ sub destroy_unmount_Volumes {
     printLC("  -> Closing LUKS Crypt volume $mapper\n", $VERBOSE);
     system("cryptsetup close $mapper");
     printLC("  -> Done closing LUKS Volume $mapper\n", $VERBOSE);
-    if ($CMDOPTIONS{d} || $CMDOPTIONS{D}) {
+    if ((defined $CMDOPTIONS{d}) || (defined $CMDOPTIONS{D})) {
       if ($deleteable) {
         if ($CMDOPTIONS{y}) {
           deleteCont($deleteable);
@@ -449,7 +497,7 @@ sub destroy_unmount_Volumes {
       }
     }
     printLC("  -> Done $action suicideCrypt volume\n", $VERBOSE);
-    if ($CMDOPTIONS{d} || $CMDOPTIONS{D}) {
+    if ((defined $CMDOPTIONS{d}) || (defined $CMDOPTIONS{D})) {
       printLC("-> SuicideCrypt volume $mapper is destroyed and unrecoverable\n", 1);
     }
   }
@@ -1022,6 +1070,7 @@ sub printHelp {
   print "-D : Destroy all detectable suicideCrypt volumes on this host.\n";
   print "-u <volume, or leave blank for list> : Unmount an encrypted volume without destroying keyfile\n";
   print "-U : unmount all detectable suicideCrypt volumes on this host.\n";
+  print "-a <container or block device to attach> : attach existing unmounted suicideCrypt drive, requires -m\n";
   print "-p : default to paranoid mode in all volume creations.\n";
   print "-r : Use /dev/random instead of /dev/urandom for all random number collection. WARNING, can significantly slow down volume creation\n";
   print "-y : assume \"yes\" to all destroy/create confirmations. WARNING: You can delete a lot of data this way!\n";
@@ -1076,6 +1125,12 @@ sub getUUID {
   return $uuid;
 }
 
+sub initialise_ramdisk {
+  
+
+
+
+}
 
 ### Kicks off the logger for full execution trail
 sub logStart {
