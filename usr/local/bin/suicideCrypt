@@ -1070,7 +1070,7 @@ sub printHelp {
   print "-D : Destroy all detectable suicideCrypt volumes on this host.\n";
   print "-u <volume, or leave blank for list> : Unmount an encrypted volume without destroying keyfile\n";
   print "-U : unmount all detectable suicideCrypt volumes on this host.\n";
-  print "-I : Initialise a suicideCrypt ramdisk, place key and header files here before trying to re-attach a volume\n";
+  print "-i : Initialise a suicideCrypt ramdisk, place key and header files here before trying to re-attach a volume\n";
   print "-a <container or block device to attach> : attach existing unmounted suicideCrypt drive, requires -m\n";
   print "-p : default to paranoid mode in all volume creations.\n";
   print "-r : Use /dev/random instead of /dev/urandom for all random number collection. WARNING, can significantly slow down volume creation\n";

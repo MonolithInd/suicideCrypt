@@ -40,3 +40,22 @@ suicideCrypt creates volumes where:
 By simply zeroing and unmounting the tmpfs ramdisk the ability to lock and unlock the encrypted volume are lost forever. suicideCrypt automates this process and makes it a simple single line command to create or destroy such volumes as well as mananging the tmpfs ramdisk required. 
 
 In this manner, rapid and total destruction of the data volume is acheivable in seconds without requiring zeroing a large device. Furthermore all actions performed are logged in a full on disk audit log, showing that at no point did a typical operator have access to the cryptographic keys needed to lock/unlock the drive. The destruction of the header and keyfile, followed by an unmount is the software equivilent of destruction of the AES key in a hardware encryption drive. 
+
+# Install
+
+suicideCrypt is available as a .deb file downloaded from https://www.monolithindustries.com/repos/apt/debian/pool/main/s/suicidecrypt/ 
+
+Or, if you like you can add the private GPG signed repository below by grabbing the public key with the command: 
+
+wget -O - https://www.monolithindustries.com/repos/key/suicideCrypt.gpg.key|apt-key add -
+
+Then adding the repository to your apt sources with: 
+
+add-apt-repository "deb https://www.monolithindustries.com/repos/apt/debian xenial main"
+
+Once this is done you should be able to do a simple:
+
+* apt-get update
+* apt-get install suicidecrypt
+
+Otherwise you can git clone the software and move the various files into place manually. 
