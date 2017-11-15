@@ -1,0 +1,12 @@
+Package: suicidecrypt
+Version: 1.0-2
+Section: base
+Priority: optional
+Architecture: all
+Depends: libpoe-perl, libconfig-general-perl, libio-pty-perl, libjson-perl, libproc-daemon-perl, libproc-pid-file-perl
+Maintainer: Sebastian Kai Frost <sebastian.kai.frost@gmail.com>
+Description: suicideCrypt
+ A tool for creating cryptographically strong volumes that destroy themselves upon tampering or via issued command. 
+ Included is a daemon designed to react to system events and on a configurable basis, destroy data volumes 
+ encrypted using the suicideCrypt tool. This process is fast and, if used correctly, both unrecoverable by an 
+ adversery and auditably unrecoverable by the volume owner.

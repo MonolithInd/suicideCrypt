@@ -1,1 +1,0 @@
-../../../usr/local/share/suicideCrypt/plugins/example.pl

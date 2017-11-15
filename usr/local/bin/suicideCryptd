@@ -9,12 +9,12 @@ use Proc::PID::File;
 use Data::Dumper;
 use POE qw(Wheel::Run Filter::Reference Wheel::FollowTail);
 
-# requirements :  libpoe-perl, libconfig-general-perl, libio-pty-perl libjson-perl, libproc-daemon-perl, libproc-pid-file-perl
+# requirements :  libpoe-perl, libconfig-general-perl, libio-pty-perl, libjson-perl, libproc-daemon-perl, libproc-pid-file-perl
 
 my $conf = Config::General->new(
-         -ConfigFile => "../../../etc/suicideCrypt/suicideCryptd.conf",
+         -ConfigFile => "/etc/suicideCrypt/suicideCryptd.conf",
 );
-my $VERSION = 0.5;
+my $VERSION = 1.0;
 my $DAEMON = 0;
 my $DEBUG = 2;
 my %configH = $conf->getall;
@@ -25,7 +25,9 @@ my @PLUGINS;
 my $plugin;
 my %MANUALVOLUMES;
 my %ALERTS;
-my $ALERTTEMP = 32;
+if ($configH{systemevents}{sensors}{enabled}) {
+  my $ALERTTEMP = $configH{systemevents}{sensors}{alerttemp};
+}
 my @systemUsers = getSystemUsers();
 my @allowedUsers = getAllowedUsers();
 
@@ -76,7 +78,7 @@ POE::Session->create(
 # POE session to check for temp alarms and ram freezing events
 # Start a POE session to monitor lm-sensors for temperature events                                                                                                                                                                                                                  
 if ($configH{systemevents}{sensors}{enabled}) {
-  print "  -> Starting an lm-sensors monitor\n" if $VERBOSE;
+  print "  -> Starting an lm-sensors monitor, threshold: $ALERTEMP\n" if $VERBOSE;
   POE::Session->create(
     inline_states => {
       _start => sub {
@@ -136,6 +138,7 @@ POE::Session->create(
     
       foreach $key (keys %ALERTS) {
         if ($ALERTS{$key}{alert}) {
+          # why would we alert with no volumes being monitored?
           if (%VOLUMES) { 
             print "\n\n*\\ Alert!\n" if $VERBOSE;
             if ($key =~ /temp/) {
@@ -149,7 +152,7 @@ POE::Session->create(
             } else {
               print "**\\------> We have detected a plugin alert event from $key!\n" if $VERBOSE;
             }
-            print "\n";
+            print "\n" if $VERBOSE;
             alertReact();
             # reset the alert; 
           }
@@ -523,7 +526,7 @@ sub alertReact {
 
 sub getPlugins {
   my @plugins;
-  my $dir = "../../../etc/suicideCrypt/plugins/";
+  my $dir = "/etc/suicideCrypt/plugins/";
   
 #  opendir(BIN, $dir) or die "Can't open plugins dir: $dir: $!";
 #  @plugins = readdir BIN;
@@ -543,7 +546,6 @@ sub updateVols {
       print "  --> New suicideCrypt volume detected $key, inserting into monitoring hash\n" if ($DEBUG >= 2);
       $VOLUMES{$key} = $volhash{$key};
     } else {
-#      print "  --> Returned Volume already being watched, ignoring and continuing\n" if ($DEBUG >= 2);
     }
   }
   # find drives that have gone away and stop watching them.
