@@ -1,0 +1,14 @@
+[Unit]
+Description=suicidecrypt
+After=network.target
+
+[Service]
+Type=forking
+User=root
+#WorkingDirectory=/
+ExecStart=/usr/local/bin/suicideCryptd start
+ExecStop=/usr/local/bin/suicideCryptd stop
+Restart=on-abort
+
+[Install]
+WantedBy=multi-user.target
