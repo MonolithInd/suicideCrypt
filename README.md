@@ -1,17 +1,17 @@
 # 1.0 suicideCrypt
-A tool for creating cryptographically strong volumes that destroy themselves upon tampering or via issued command. Included is a daemon designed to react to system events and on a configurable basis, destroy data volumes encrypted using the suicideCrypt tool. This process is fast and, if used correctly, both unrecoverable by an adversery and auditably unrecoverable by the volume owner. 
+A tool for creating cryptographically strong volumes that destroy themselves upon tampering or via issued command. Included is a daemon designed to react to system events and on a configurable basis, destroy data volumes encrypted using the suicideCrypt tool. This process is fast and, if used correctly, both unrecoverable by an adversary and auditably unrecoverable by the volume owner. 
 
 # 2.0 Why suicideCrypt?
-While looking at the options for self destroying encrypted data volumes it seemed that most of the work in the space involves custom engineered hard drives with hardware AES chips that self destruct based on a variety of triggers (hard drive removal, SMS, email, physical button etc). Almost universally these drives are epensive and, once triggered, unusable and have to be replaced at great cost. 
+While looking at the options for self-destroying encrypted data volumes it seemed that most of the work in the space involves custom engineered hard drives with hardware AES chips that self-destruct based on a variety of triggers (hard drive removal, SMS, email, physical button etc). Almost universally these drives are expensive and some, once triggered, unusable and have to be replaced at great cost. 
 
-I wanted to see if I could duplicate the behavior of these drives in a safe, secure and non recoverable way using only open source software and known cryptographic best practises. In this way I hoped to bring secure, self destroying Hard Drives within the reach of the average Linux user. 
+I wanted to see if I could duplicate the behavior of these drives in a safe, secure and non-recoverable way using only open source software and known cryptographic best practices. In this way I hoped to bring secure, self destroying Hard Drives within the reach of the average Linux user. 
 
-As a side goal I wanted to see if I could plausibly solve the ["rubber hose"](https://en.wikipedia.org/wiki/Rubber-hose_cryptanalysis) issue typical of cryptographic volumes as demonstrated by [this XKCD comic.](https://xkcd.com/538/). In the case of the commercial hardware products the AES key, whcih the user never has, is destroyed upon a trigger event. I wanted to see if it's possible to recreate this behavior upon server theft, or specific triggering events; intrusion, hardware loggers, hardware imagers etc.
+As a side goal I wanted to see if I could plausibly solve the ["rubber hose"](https://en.wikipedia.org/wiki/Rubber-hose_cryptanalysis) issue typical of cryptographic volumes as demonstrated by [this XKCD comic.](https://xkcd.com/538/). In the case of the commercial hardware products the AES key, which the user never has, is destroyed upon a trigger event. I wanted to see if it's possible to recreate this behavior upon server theft, or specific triggering events; intrusion, hardware loggers, hardware imagers etc.
 
 In short, could I create a volume with an audit trail that proves to a reasonable level that the owner of the volume is personally unable to decrypt the volume once it is unmounted, tampered with or powered down. Turns out, yes.
 
 # 3.0 How?
-suicideCrypt acheives the goal of strong cryptographic volumes that become unrecoverable upon tampering, even for the creator of the volume using 2 software components. 
+suicideCrypt achieves  the goal of strong cryptographic volumes that become unrecoverable upon tampering, even for the creator of the volume using 2 software components. 
 
 * suicideCrypt : A tool for creating and destroying strong cryptographic volumes in such a manner that the creator, via audit trail, can claim zero ability to recover a destroyed cryptiographic volume. suicideCrypt can create secure block devices or, if required secure container files that can be mounted as a disk under linux/LUKS.
 
@@ -26,26 +26,26 @@ Then based on these, trigger destruction of suicideCrypt create drives on the lo
 
 suicideCrypt volumes are created using the [Linux LUKS/dm-crypt modules](https://wiki.archlinux.org/index.php/Dm-crypt/Device_encryption) such that the key to decrypt the volume is not chosen or known by the admin of the system. suicideCrypt can create these volumes in one of two ways:
 
-* Normal Mode: This volume can be unmounted and remounted as long as the server remains powered on, or the disk is undestroyed. There is also provision to copy the header and key to external or removable media so the drive can be recovered by the admin after a reboot. This highly limits resistence to "ruber hose" decryption.
-* Paranoid Mode: In this mode the key and header used to encrypt the volume are deleted immediatly upon volume creation and mount. In this manner the drive is, auditably, fully unrecoverable in the event of unmount or power loss even to the creator of the drive. 
+* Normal Mode: This volume can be unmounted and remounted as long as the server remains powered on, or the disk is undestroyed. There is also provision to copy the header and key to external or removable media so the drive can be recovered by the admin after a reboot. This highly limits resistance to "ruber hose" decryption.
+* Paranoid Mode: In this mode the key and header used to encrypt the volume are deleted immediately upon volume creation and mount. All events of drive creation and key destruction are fully, high accuracy timestamp, logged to system logs. In this manner the drive is, auditably, fully unrecoverable in the event of unmount or power loss even to the creator of the drive. 
 
 A full description of the LUKS/dm-crypt kenrnel module and how it works is beyond the scope of this readme. But simplified, the LUKS module uses a header attached to an encrypted device to store the cryptographic decryption key, and has a number of slots (8) to store keys that can be used to unlock the decryption key. In normal operation this header is prepended onto the start of the encrypted device/container and a passphrase or keyfile are used to lock/unlock the decrpytion key and mount the volume. 
 
 suicideCrypt creates volumes where:
 
-* The header component is physically seperated from the drive it unlocks.
+* The header component is physically separated from the drive it unlocks.
 * A fully random (for given values of random) 4096 bit keyfile is generated to lock/unlock the encryption key/header. 
 * Both the header and random keyfile are stored on a temporary ramdisk in memory such that neither, in correct operation, are ever written to any kind of magnetic or SSD type media. 
 
-By simply zeroing and unmounting the tmpfs ramdisk the ability to lock and unlock the encrypted volume are lost forever. suicideCrypt automates this process and makes it a simple single line command to create or destroy such volumes as well as mananging the tmpfs ramdisk required. 
+By simply zeroing and unmounting the tmpfs ramdisk the ability to lock and unlock the encrypted volume are lost forever. suicideCrypt automates this process and makes it a simple single line command to create or destroy such volumes as well as managing the tmpfs ramdisk required. 
 
-In this manner, rapid and total destruction of the data volume is acheivable in seconds without requiring zeroing a large device. Furthermore all actions performed are logged in a full on disk audit log, showing that at no point did a typical operator have access to the cryptographic keys needed to lock/unlock the drive. The destruction of the header and keyfile, followed by an unmount is the software equivilent of destruction of the AES key in a hardware encryption drive. 
+In this manner, rapid and total destruction of the data volume is achievable in sub seconds without requiring zeroing a large device. Furthermore, all actions performed are logged in a full on disk audit log, showing that at no point did a typical operator have access to the cryptographic keys needed to lock/unlock the drive. The destruction of the header and keyfile, followed by an unmount is the software equivalent of destruction of the AES key in a hardware encryption drive. 
 
 # 4.0 Install
 
-suicideCrypt is available as a .deb file downloaded from https://www.monolithindustries.com/repos/apt/debian/pool/main/s/suicidecrypt/ 
+suicideCrypt is available as a .deb file downloaded from https://www.monolithindustries.com/repos/apt/debian/pool/main/s/suicidecrypt/ for ubuntu 16 LTS and rasbian for raspberry pi.
 
-Or, if you like you can add the private GPG signed repository below by grabbing the public key with the command::
+Or, if you like you can add the private GPG signed repository below by grabbing the public key with the command:
 
     wget -O - https://www.monolithindustries.com/repos/key/suicideCrypt.gpg.key|apt-key add -
 
@@ -67,7 +67,7 @@ Otherwise you can git clone the software and move the various files into place m
 
 **5.1.1 Volume Creation:**
 
-suicidecrypt is run from the command line and in abcense of any switches prints it's usage summary.:
+suicidecrypt is run from the command line and with -h or --help prints it's usage summary.:
 
     root@crypt-test:# suicideCrypt -h
 
@@ -90,7 +90,7 @@ suicidecrypt is run from the command line and in abcense of any switches prints 
       -D : Destroy ALL detectable suicideCrypt volumes on this host.
       -u <volume, or leave blank for list> : Unmount an encrypted volume without destroying keyfile
       -U : unmount ALL detectable suicideCrypt volumes on this host.
-      -i : Initialise a suicideCrypt ramdisk, used to remount an exsisting sucidecrypt volume
+      -i : Initialise a suicideCrypt ramdisk, used to remount an existing sucidecrypt volume
       -a <container or block device to attach> : remount an existing unmounted suicideCrypt drive.
       -p : default to paranoid mode in all volume creations. (see manpage for paranoid mode
       -r : Use /dev/random instead of /dev/urandom for all random number collection.
@@ -100,7 +100,7 @@ suicidecrypt is run from the command line and in abcense of any switches prints 
 
     root@crypt-test:# 
 
-In it's simplest mode suicidecrypt can be run with the *"-n"* options for "new" and it will prompt the user for the various options it requires to build a cryptographic volume. It will start off asking if you require a block or container type volume, select one. After that it simply reqires:
+In it's simplest mode suicidecrypt can be run with the *"-n"* options for "new" and it will prompt the user for the various options it requires to build a cryptographic volume. It will start off asking if you require a block or container type volume, select one. After that it simply requires:
 
 * A target block device (if you selected block device) e.g. /dev/sda
 * A mount point to mount the drive (/mnt)
@@ -111,7 +111,7 @@ for a container type volume you will also be prompted for
 * Container size e.g 200m, 3g etc.
 * Location to store the container file. *note* please make sure the target volume is large enough to hold the container you are making. e.g /usr/local/share/containers 
 
-The software will then display a summary of the choices you have made and ask if you wish to continue.::
+The software will then display a summary of the choices you have made and ask if you wish to continue:
 
     We are now ready to create your encrypted volume with the following options:
 
@@ -162,7 +162,7 @@ We can perform a variety of actions on these disks such as:
 * -u unmount
 * -U unmount all
 
-If you provide *"-d"* or *"-u"* with either the mapper path or the mount path as seen in the output of *"-l"* it will immediatly destroy or unmount that volume. If you do not specify a volume it will show you the list and prompt you to select a drive from the list:
+If you provide *"-d"* or *"-u"* with either the mapper path or the mount path as seen in the output of *"-l"* it will immediately destroy or unmount that volume. If you do not specify a volume it will show you the list and prompt you to select a drive from the list:
 
     root@crypt-test:/# suicideCrypt -d
 
@@ -173,11 +173,11 @@ If you provide *"-d"* or *"-u"* with either the mapper path or the mount path as
 
     Enter number of volume you wish to destroy: 
     
-***Please remember* that if you destroy a suicidecrypt contaner or block device is *cannot* be recovered via any method known to me. Be sure you wish to do this before selecting this option. **
+***Please remember* that if you destroy a suicidecrypt container or block device is *cannot* be recovered via any method known to me. Be sure you wish to do this before selecting this option. **
 
 If you chose to destroy a container based volume you will be prompted if you want to clean up the container file at the same time (it's now useless) you can call suicidecrypt with *"-y"* to automatically do this. 
 
-Unmount performs similar actions to destroy in that it unmounts the volume mount and secure closes the cryptographic mapper interface, however it doesn't delete the LUKS header or keyfiles from the ramdisk /tmp/suicideCryptRAMdisk mount. If you have left these here the drive will be remountable until such time as the server is power cycled at which point **these files will be lost foever**.
+Unmount performs similar actions to destroy in that it unmounts the volume mount and secure closes the cryptographic mapper interface, however it doesn't delete the LUKS header or keyfiles from the ramdisk /tmp/suicideCryptRAMdisk mount. If you have left these here the drive will be remountable until such time as the server is power cycled at which point **these files will be lost forever**.
 
 If you wish to be able to remount a sucideCrypt disk past a power cycle the two files that match the UUID of the suicideCrypt device or container *must* be copied to some external media. **DO NOT** write these file to the spinning disk or SSD of the server itself. Doing so invalidates all security of the volumed in question. 
 
@@ -208,7 +208,7 @@ If installed from .deb is can be started by using:
 
     service suicidecrypt start
     
-This will start the daemon and begind watching for the default events. In it's base install suicidecryptd only monitors udev events and doesn't react beyond informational to any triggers. It will start, enumerate mounted suicidecrypt volumes and begin managing them. 
+This will start the daemon and begin watching for the default events. In it's base install suicidecryptd only monitors udev events and doesn't react beyond informational to any triggers. It will start, enumerate mounted suicidecrypt volumes and begin managing them. 
 
 The main config file for suicidecryptd is:
 
@@ -221,7 +221,7 @@ The config is an apache style config. Built in monitors include:
 * auth log parsing
 * ossec IDS log parsing
 
-These can all be turned on and off, and various triger levels can be set for each of them. 
+These can all be turned on and off, and various trigger levels can be set for each of them. 
 
 A default config file looks like: 
 
@@ -274,17 +274,17 @@ A default config file looks like:
       </auth>
     </logs>
 
-the default response can be either "ignore", "destroy", or "unmount". This value is set at the root of the config and can be changed at other points for differing responses depending on alert. The heiracrchy is:
+the default response can be either "ignore", "destroy", or "unmount". This value is set at the root of the config and can be changed at other points for differing responses depending on alert. The hierarchy is:
 
 global < service < volume
 
 So a service set default action will override the global, but if a particular volume is configured with a differing action to any default, that will always take precidence. 
 
-In this way you can unmount by default; but if, for example, the system detects a RAM chill event and suspects someone is trying to extract your AES key, it can immediatly destroy all drives by prefrence. 
+In this way you can unmount by default; but if, for example, the system detects a RAM chill event and suspects someone is trying to extract your AES key, it can immediately destroy all drives by preference. 
 
 5.2.1 Plugins
 -------------
-Suicidecryptd supports plugins to react to arbitrary external events. This can be used to trigger based on output from other IDS systems (tripwire etc) or from say, a post to a particular twitter feed. The recipt of a text message, phase of the moon or days ending in "y".
+Suicidecryptd supports plugins to react to arbitrary external events. This can be used to trigger based on output from other IDS systems (tripwire etc) or from say, a post to a particular twitter feed. The receipt of a text message, phase of the moon or days ending in "y".
 
 Plugins must reside in:
 
@@ -298,11 +298,11 @@ Once the link is created, re-start the service and the new plugin will be active
 
 Plugins can be any simple script that is called every 1 second. If there is no alarm the script must reply "OK" with no carriage return to console. 
 
-If there is an alart is must print the name of the alert, the trigger level that caused the alert (arbitrary) and optionally a message to display in the log (or console in non-daemon mode) with the alert. eg, for the raspberryPi alert plugin:
+If there is an alert it must print the name of the alert, the trigger level that caused the alert (arbitrary) and optionally a message to display in the log (or console in non-daemon mode) with the alert. eg, for the raspberryPi alert plugin:
 
     pi-temp;15;CPU temp 10 has dropped below 15
     
-Please be careful with your suicideCryptd commands. If you are adding a new destroy check to the system first test it on a sytem with no important data. I wish to stress again that any volumes destroyed with suicidecryptd are **unrecoverable** and all data will be lost. 
+Please be careful with your suicideCryptd commands. If you are adding a new destroy check to the system first test it on a system with no important data. I wish to stress again that any volumes destroyed with suicidecryptd are **unrecoverable** and all data will be lost. 
 
 # 6.0 Disclaimer
 
