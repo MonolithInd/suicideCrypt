@@ -65,6 +65,8 @@ Otherwise you can git clone the software and move the various files into place m
 suicidecrypt
 ------------
 
+**Volume Creation:**
+****
 suicidecrypt is run from the command line and in abcense of any switches prints it's usage summary.::
 
     root@crypt-test:~# suicideCrypt
@@ -100,7 +102,7 @@ In it's simplest mode suicidecrypt can be run with the "-n" options for "new" an
 for a container type volume you will also be prompted for 
 
 * Container size e.g 200m, 3g etc.
-* Location to store the container file. *note* please make sure the target volume is large enough to hold the container you are making. 
+* Location to store the container file. *note* please make sure the target volume is large enough to hold the container you are making. e.g /usr/local/share/containers 
 
 The software will then display a summary of the choices you have made and ask if you wish to continue.::
 
@@ -120,4 +122,6 @@ The software will then display a summary of the choices you have made and ask if
  
     Do you wish to continue? (y/n):
 Note that some of the options were not selectable during setup. These are "advanced" and can be changed via command line if required, some cannot. At the moment the keyfile size, Hash spec and cipher cannot be changed. This might be altered in a future version. 
+
+If you wish the script the creation of a suicide 
 
