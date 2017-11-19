@@ -69,7 +69,7 @@ suicidecrypt
 
 suicidecrypt is run from the command line and in abcense of any switches prints it's usage summary.:
 
-    root@crypt-test:/usr/local/src/suicideCrypt/usr/local/bin# ./suicideCrypt -h
+    root@crypt-test:# suicideCrypt -h
 
     sucicideCrypt version 1.0
 
@@ -98,7 +98,7 @@ suicidecrypt is run from the command line and in abcense of any switches prints 
       -v : verbose, display more detail on execution.
       -h : Display this text.
 
-    root@crypt-test:/usr/local/src/suicideCrypt/usr/local/bin# 
+    root@crypt-test:# 
 
 In it's simplest mode suicidecrypt can be run with the *"-n"* options for "new" and it will prompt the user for the various options it requires to build a cryptographic volume. It will start off asking if you require a block or container type volume, select one. After that it simply reqires:
 
