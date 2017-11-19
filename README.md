@@ -186,7 +186,7 @@ Example:::
     Sucessfully attached /dev/sdb on /mnt
     root@crypt-test:/# 
 
-If you have moved the header and keyfile off the server and rebooted since it was mounted, you will need to create the initial ramdisk using *"-i"* and copy the correct header and keyfiles to this location for *"-a"* to work. Each header and keyfile is tagged with the UUID of the cryptographic volume. If you're not sure which key and header go with this volume you can get the UUID from the file or block device using:::
+If you have moved the header and keyfile off the server and rebooted since it was mounted, you will need to create the initial ramdisk using *"-i"* and copy the correct header and keyfiles to this location for *"-a"* to work. Each header and keyfile is tagged with the UUID of the cryptographic volume. If you're not sure which key and header go with this volume you can get the UUID from the file or block device using:
 
     root@crypt-test:/# cryptsetup luksUUID /dev/sdb
     052219de-1863-43ed-9206-91f4ff4ff4a6
