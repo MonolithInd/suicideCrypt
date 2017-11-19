@@ -1,7 +1,7 @@
-# suicideCrypt
+# 1.0 suicideCrypt
 A tool for creating cryptographically strong volumes that destroy themselves upon tampering or via issued command. Included is a daemon designed to react to system events and on a configurable basis, destroy data volumes encrypted using the suicideCrypt tool. This process is fast and, if used correctly, both unrecoverable by an adversery and auditably unrecoverable by the volume owner. 
 
-# Why suicideCrypt?
+# 2.0 Why suicideCrypt?
 While looking at the options for self destroying encrypted data volumes it seemed that most of the work in the space involves custom engineered hard drives with hardware AES chips that self destruct based on a variety of triggers (hard drive removal, SMS, email, physical button etc). Almost universally these drives are epensive and, once triggered, unusable and have to be replaced at great cost. 
 
 I wanted to see if I could duplicate the behavior of these drives in a safe, secure and non recoverable way using only open source software and known cryptographic best practises. In this way I hoped to bring secure, self destroying Hard Drives within the reach of the average Linux user. 
@@ -10,7 +10,7 @@ As a side goal I wanted to see if I could plausibly solve the ["rubber hose"](ht
 
 In short, could I create a volume with an audit trail that proves to a reasonable level that the owner of the volume is personally unable to decrypt the volume once it is unmounted, tampered with or powered down. Turns out, yes.
 
-# How?
+# 3.0 How?
 suicideCrypt acheives the goal of strong cryptographic volumes that become unrecoverable upon tampering, even for the creator of the volume using 2 software components. 
 
 * suicideCrypt : A tool for creating and destroying strong cryptographic volumes in such a manner that the creator, via audit trail, can claim zero ability to recover a destroyed cryptiographic volume. suicideCrypt can create secure block devices or, if required secure container files that can be mounted as a disk under linux/LUKS.
@@ -41,7 +41,7 @@ By simply zeroing and unmounting the tmpfs ramdisk the ability to lock and unloc
 
 In this manner, rapid and total destruction of the data volume is acheivable in seconds without requiring zeroing a large device. Furthermore all actions performed are logged in a full on disk audit log, showing that at no point did a typical operator have access to the cryptographic keys needed to lock/unlock the drive. The destruction of the header and keyfile, followed by an unmount is the software equivilent of destruction of the AES key in a hardware encryption drive. 
 
-# Install
+# 4.0 Install
 
 suicideCrypt is available as a .deb file downloaded from https://www.monolithindustries.com/repos/apt/debian/pool/main/s/suicidecrypt/ 
 
@@ -60,12 +60,12 @@ Once this is done you should be able to do a simple:
 
 Otherwise you can git clone the software and move the various files into place manually. 
 
-# Usage
+# 5.0 Usage
 
-suicidecrypt
+5.1 suicidecrypt
 ------------
 
-**Volume Creation:**
+**5.1.1 Volume Creation:**
 
 suicidecrypt is run from the command line and in abcense of any switches prints it's usage summary.:
 
@@ -144,7 +144,7 @@ To create a basic 2gig paranoid mode cryptographic container and mount it on /tm
 
 If you wish to see the steps of the creation process use "-v" for verbose.
 
-**Volume Management**
+**5.1.2 Volume Management**
 
 You can quickly list all volumes currently created and mounted by suicide crypt using the *"-l"* option:
 
@@ -199,7 +199,116 @@ If you have moved the header and keyfile off the server and rebooted since it wa
     052219de-1863-43ed-9206-91f4ff4ff4a6
     root@crypt-test:/# 
     
-suicideCryptd
+5.2 suicideCryptd
 -------------
 
 This is the daemon to monitor and manage cryptographic volumes. It works best with volumes created by the suicideCrypt wrapper (automatic detection etc) but will work with any linux based cryptographic volumes with some configuration. 
+
+If installed from .deb is can be started by using:
+
+    service suicidecrypt start
+    
+This will start the daemon and begind watching for the default events. In it's base install suicidecryptd only monitors udev events and doesn't react beyond informational to any triggers. It will start, enumerate mounted suicidecrypt volumes and begin managing them. 
+
+The main config file for suicidecryptd is:
+
+    /etc/suicideCrypt/suicideCryptd.conf
+    
+The config is an apache style config. Built in monitors include:
+
+* lmsensors
+* udev events
+* auth log parsing
+* ossec IDS log parsing
+
+These can all be turned on and off, and various triger levels can be set for each of them. 
+
+A default config file looks like: 
+
+    defaultresponse = unmount
+    unmountcmd = "/usr/local/bin/suicideCrypt.pl -y -u"
+    destroycmd = "/usr/local/bin/suicideCrypt.pl -y -d"
+    verbose = 1
+
+    <mounts>
+      <"/tmp/spam">
+       defaultresponse = ignore  
+       unmountcmd  = "/usr/local/bin/suicideCrypt.pl -y -d" 
+      </"/tmp/spam">
+    </mounts>
+
+    <systemevents>
+      <sensors>
+        enabled = 0
+        alerttemp = 15
+        defaultresponse = destroy
+      </sensors>
+
+      <udevadm>
+        enabled = 1
+        <devices>
+          keyboardmouse = 1
+          monitor = 1
+    #     disk = 1  # Disk is not supported yet.
+          usb = 1 # USB will detect ANY usb state change. Use with caution. 
+          network = 0
+        </devices>
+        defaultresponse = unmount
+      </udevadm>
+    </systemevents>
+
+    <logs>
+      <ossec>
+        enabled = 0
+        location = "/var/ossec/logs/alerts/alerts.log"
+        paniclevel = 11
+        defaultresponse = destroy
+      </ossec>
+      <auth>
+        enabled = 1
+        location = "/var/log/auth.log"
+        defaultresponse = unmount
+        allowedusers = ""
+        ignorecron = 1
+        allowsystemusers = 0
+      </auth>
+    </logs>
+
+the default response can be either "ignore", "destroy", or "unmount". This value is set at the root of the config and can be changed at other points for differing responses depending on alert. The heiracrchy is:
+
+global < service < volume
+
+So a service set default action will override the global, but if a particular volume is configured with a differing action to any default, that will always take precidence. 
+
+In this way you can unmount by default; but if, for example, the system detects a RAM chill event and suspects someone is trying to extract your AES key, it can immediatly destroy all drives by prefrence. 
+
+**5.2.1 Plugins **
+
+Suicidecryptd supports plugins to react to arbitrary external events. This can be used to trigger based on output from other IDS systems (tripwire etc) or from say, a post to a particular twitter feed. The recipt of a text message, phase of the moon or days ending in "y".
+
+Plugins must reside in:
+
+    /usr/local/share/suicidecrypt/plugins/
+    
+and are activated by making a sybolic link in: 
+
+    /etc/sucidecrypt/plugins
+    
+Once the link is created, re-start the service and the new plugin will be active. 
+
+Plugins can be any simple script that is called every 1 second. If there is no alarm the script must reply "OK" with no carriage return to console. 
+
+If there is an alart is must print the name of the alert, the trigger level that caused the alert (arbitrary) and optionally a message to display in the log (or console in non-daemon mode) with the alert. eg, for the raspberryPi alert plugin:
+
+    pi-temp;15;CPU temp 10 has dropped below 15
+    
+Please be careful with your suicideCryptd commands. If you are adding a new destroy check to the system first test it on a sytem with no important data. I wish to stress again that any volumes destroyed with suicidecryptd are **unrecoverable** and all data will be lost. 
+
+# 6.0 Disclaimer
+
+This script is provided "as is". I am in no way responsible if you use this script and it locks you out of your server on the other side of the planet, starts world war 3 or causes a global burrito shortage.
+
+Written by Sebastian Kai Frost. sebastian.kai.frost@gmail.com
+
+
+
