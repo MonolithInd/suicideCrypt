@@ -45,15 +45,15 @@ In this manner, rapid and total destruction of the data volume is acheivable in 
 
 suicideCrypt is available as a .deb file downloaded from https://www.monolithindustries.com/repos/apt/debian/pool/main/s/suicidecrypt/ 
 
-Or, if you like you can add the private GPG signed repository below by grabbing the public key with the command:: 
+Or, if you like you can add the private GPG signed repository below by grabbing the public key with the command::
 
     wget -O - https://www.monolithindustries.com/repos/key/suicideCrypt.gpg.key|apt-key add -
 
-Then adding the repository to your apt sources with::
+Then adding the repository to your apt sources with:
 
     add-apt-repository "deb https://www.monolithindustries.com/repos/apt/debian xenial main"
 
-Once this is done you should be able to do a simple::
+Once this is done you should be able to do a simple:
 
     apt-get update
     apt-get install suicidecrypt
@@ -67,32 +67,39 @@ suicidecrypt
 
 **Volume Creation:**
 
-suicidecrypt is run from the command line and in abcense of any switches prints it's usage summary.::
+suicidecrypt is run from the command line and in abcense of any switches prints it's usage summary.:
 
-    root@crypt-test:~# suicideCrypt
+    root@crypt-test:/usr/local/src/suicideCrypt/usr/local/bin# ./suicideCrypt -h
 
     sucicideCrypt version 1.0
 
     Usage:
-    -n : create an encrypted volume in interactive mode
-    -c <path> : Create a file container encrypted volume located on <path>, requires -s, -m, and optionally -p, -y
-    -b <block device> : Create a block device encrypted volume, requires -b, -m, and optionally -p, -y
-    -s <size>m/g : Size of encrypted container in meg or gig, used with -c
-    -m <mountpoint> : Mountpoint for encrypted volume, used with -c and -b
-    -l : List all suicideCrypt created volumes
-    -d <volume, or leave blank for list> : Destroy an encrypted volume.
-    -D : Destroy all detectable suicideCrypt volumes on this host.
-    -u <volume, or leave blank for list> : Unmount an encrypted volume without destroying keyfile
-    -U : unmount all detectable suicideCrypt volumes on this host.
-    -i : Initialise a suicideCrypt ramdisk, place key and header files here before trying to re-attach a volume
-    -a <container or block device to attach> : attach existing unmounted suicideCrypt drive, requires -m
-    -p : default to paranoid mode in all volume creations.
-    -r : Use /dev/random instead of /dev/urandom for all random number collection. WARNING, can significantly slow down volume creation
-    -y : assume "yes" to all destroy/create confirmations. WARNING: You can delete a lot of data this way!
-    -v : verbose, display more detail on execution.
-    -h : Display this text.
 
-    root@crypt-test:~#
+      -n : run program in interactive mode (default)
+
+    Advanced Options:
+    ----------------
+    Create:
+      -c <path> : Create an encrypted volume container located on <path>
+      -b <block device> : Create an encrypted volume block device. e.g /dev/sdb
+      -s <size>m/g : Size of encrypted container in meg or gig. e.g 200m or 4g
+      -m <mountpoint> : Mountpoint to mount encrypted volume on e.g /mnt
+    Manage:
+      -l : List all suicideCrypt created volumes
+      -d <volume, or leave blank for list> : Destroy an encrypted volume.
+      -D : Destroy ALL detectable suicideCrypt volumes on this host.
+      -u <volume, or leave blank for list> : Unmount an encrypted volume without destroying keyfile
+      -U : unmount ALL detectable suicideCrypt volumes on this host.
+      -i : Initialise a suicideCrypt ramdisk, used to remount an exsisting sucidecrypt volume
+      -a <container or block device to attach> : remount an existing unmounted suicideCrypt drive.
+      -p : default to paranoid mode in all volume creations. (see manpage for paranoid mode
+      -r : Use /dev/random instead of /dev/urandom for all random number collection.
+      -y : assume "yes" to all destroy/create confirmations.
+      -v : verbose, display more detail on execution.
+      -h : Display this text.
+
+    root@crypt-test:/usr/local/src/suicideCrypt/usr/local/bin# 
+
 In it's simplest mode suicidecrypt can be run with the *"-n"* options for "new" and it will prompt the user for the various options it requires to build a cryptographic volume. It will start off asking if you require a block or container type volume, select one. After that it simply reqires:
 
 * A target block device (if you selected block device) e.g. /dev/sda
@@ -125,13 +132,13 @@ Note that some of the options were not selectable during setup. These are "advan
 
 If you wish the script the creation of a suicideCrypt device you can pre-enter all the options from the command line and skip the confirmation step using *"-y"*. 
 
-For example, to create a cryptographic volume on /dev/sdb and mount it on /mnt you would enter the following::
+For example, to create a cryptographic volume on /dev/sdb and mount it on /mnt you would enter the following:
 
     root@crypt-test:/# suicideCrypt -b /dev/sdb -m /mnt -y
 
 This will create and mount your volume. 
 
-To create a basic 2gig paranoid mode cryptographic container and mount it on /tmp/paranoid you would::
+To create a basic 2gig paranoid mode cryptographic container and mount it on /tmp/paranoid you would:
 
     root@crypt-test:/# suicideCrypt -c /usr/local/share/containers/ -m /tmp/paranoid -s 2g -p -y 
 
@@ -139,7 +146,7 @@ If you wish to see the steps of the creation process use "-v" for verbose.
 
 **Volume Management**
 
-You can quickly list all volumes currently created and mounted by suicide crypt using the *"-l"* option::
+You can quickly list all volumes currently created and mounted by suicide crypt using the *"-l"* option:
 
     root@crypt-test:/# suicideCrypt -l
 
@@ -155,7 +162,7 @@ We can perform a variety of actions on these disks such as:
 * -u unmount
 * -U unmount all
 
-If you provide *"-d"* or *"-u"* with either the mapper path or the mount path as seen in the output of *"-l"* it will immediatly destroy or unmount that volume. If you do not specify a volume it will show you the list and prompt you to select a drive from the list::
+If you provide *"-d"* or *"-u"* with either the mapper path or the mount path as seen in the output of *"-l"* it will immediatly destroy or unmount that volume. If you do not specify a volume it will show you the list and prompt you to select a drive from the list:
 
     root@crypt-test:/# suicideCrypt -d
 
@@ -180,7 +187,7 @@ To remount a dismounted (not destroyed) suicideCrypt volume you can use the *"-a
 * the container or volume you wish to remount.
 * a mointpoint to mount the volume on.
 
-Example:::
+Example:
 
     root@crypt-test:/# suicideCrypt -a /dev/sdb -m /mnt
     Sucessfully attached /dev/sdb on /mnt
