@@ -38,7 +38,7 @@ my $DEBUG = 0;
 my $VERBOSE = 0;
 my $VERSION = "1.0";
 my $HOST = hostname();
-my $KEYSIZE = 512;
+my $KEYSIZE = 4096;
 my $RAMDISK = "/tmp/suicideCryptRAMdisk";
 my $LOGFILE = "/var/log/suicideCrypt.log";
 my $LOG;
