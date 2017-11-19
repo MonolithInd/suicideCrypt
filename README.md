@@ -47,11 +47,11 @@ suicideCrypt is available as a .deb file downloaded from https://www.monolithind
 
 Or, if you like you can add the private GPG signed repository below by grabbing the public key with the command: 
 
-wget -O - https://www.monolithindustries.com/repos/key/suicideCrypt.gpg.key|apt-key add -
+wget -O - https://www.monolithindustries.com/repos/key/suicideCrypt.gpg.key|apt-key add -::
 
 Then adding the repository to your apt sources with: 
 
-add-apt-repository "deb https://www.monolithindustries.com/repos/apt/debian xenial main"
+add-apt-repository "deb https://www.monolithindustries.com/repos/apt/debian xenial main"::
 
 Once this is done you should be able to do a simple:
 
