@@ -114,9 +114,12 @@ if (defined $CMDOPTIONS{h}) {
   createTMPfs();
   logClose();
   exit (1);
+} else {
+  logStart("Create");
+  %USROPT = getOptions();
+  new(%USROPT);
+  logClose();
 }
-
-printHelp();
 
 ### Begin subs ###
 
@@ -1060,21 +1063,25 @@ sub printHelp {
 
   printVer();
   print "Usage:\n";
-  print "-n : create an encrypted volume in interactive mode\n";
-  print "-c <path> : Create a file container encrypted volume located on <path>, requires -s, -m, and optionally -p, -y\n";
-  print "-b <block device> : Create a block device encrypted volume, requires -b, -m, and optionally -p, -y\n";
-  print "-s <size>m/g : Size of encrypted container in meg or gig, used with -c\n";
-  print "-m <mountpoint> : Mountpoint for encrypted volume, used with -c and -b\n";
+  print "-n : run program in interactive mode (default)\n\n";
+  print "Advanced Options:\n";
+  print "----------------\n";
+  print "Create:\n";
+  print "-c <path> : Create an encrypted volume container located on <path>\n";
+  print "-b <block device> : Create an encrypted volume block device. e.g /dev/sdb\n";
+  print "-s <size>m/g : Size of encrypted container in meg or gig. e.g 200m or 4g\n";
+  print "-m <mountpoint> : Mountpoint to mount encrypted volume on e.g /mnt\n";
+  print "Manage:\n";
   print "-l : List all suicideCrypt created volumes\n";
   print "-d <volume, or leave blank for list> : Destroy an encrypted volume.\n";
-  print "-D : Destroy all detectable suicideCrypt volumes on this host.\n";
+  print "-D : Destroy ALL detectable suicideCrypt volumes on this host.\n";
   print "-u <volume, or leave blank for list> : Unmount an encrypted volume without destroying keyfile\n";
-  print "-U : unmount all detectable suicideCrypt volumes on this host.\n";
-  print "-i : Initialise a suicideCrypt ramdisk, place key and header files here before trying to re-attach a volume\n";
-  print "-a <container or block device to attach> : attach existing unmounted suicideCrypt drive, requires -m\n";
-  print "-p : default to paranoid mode in all volume creations.\n";
-  print "-r : Use /dev/random instead of /dev/urandom for all random number collection. WARNING, can significantly slow down volume creation\n";
-  print "-y : assume \"yes\" to all destroy/create confirmations. WARNING: You can delete a lot of data this way!\n";
+  print "-U : unmount ALL detectable suicideCrypt volumes on this host.\n";
+  print "-i : Initialise a suicideCrypt ramdisk, used to remount an exsisting sucidecrypt volume\n";
+  print "-a <container or block device to attach> : remount an existing unmounted suicideCrypt drive.\n";
+  print "-p : default to paranoid mode in all volume creations. (see manpage for paranoid mode\n";
+  print "-r : Use /dev/random instead of /dev/urandom for all random number collection.\n";
+  print "-y : assume \"yes\" to all destroy/create confirmations.\n";
   print "-v : verbose, display more detail on execution.\n";
   print "-h : Display this text.\n\n"; 
 
