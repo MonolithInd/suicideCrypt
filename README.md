@@ -66,7 +66,7 @@ suicidecrypt
 ------------
 
 **Volume Creation:**
-****
+
 suicidecrypt is run from the command line and in abcense of any switches prints it's usage summary.::
 
     root@crypt-test:~# suicideCrypt
@@ -93,7 +93,7 @@ suicidecrypt is run from the command line and in abcense of any switches prints 
     -h : Display this text.
 
     root@crypt-test:~#
-In it's simplest mode suicidecrypt can be run with the "-n" options for "new" and it will prompt the user for the various options it requires to build a cryptographic volume. It will start off asking if you require a block or container type volume, select one. After that it simply reqires:
+In it's simplest mode suicidecrypt can be run with the *"-n"* options for "new" and it will prompt the user for the various options it requires to build a cryptographic volume. It will start off asking if you require a block or container type volume, select one. After that it simply reqires:
 
 * A target block device (if you selected block device) e.g. /dev/sda
 * A mount point to mount the drive (/mnt)
@@ -123,5 +123,50 @@ The software will then display a summary of the choices you have made and ask if
     Do you wish to continue? (y/n):
 Note that some of the options were not selectable during setup. These are "advanced" and can be changed via command line if required, some cannot. At the moment the keyfile size, Hash spec and cipher cannot be changed. This might be altered in a future version. 
 
-If you wish the script the creation of a suicide 
+If you wish the script the creation of a suicideCrypt device you can pre-enter all the options from the command line and skip the confirmation step using *"-y"*. 
+
+For example, to create a cryptographic volume on /dev/sdb and mount it on /mnt you would enter the following::
+
+    root@crypt-test:/# suicideCrypt -b /dev/sdb -m /mnt -y
+
+This will create and mount your volume. 
+
+To create a basic 2gig paranoid mode cryptographic container and mount it on /tmp/paranoid you would::
+
+    root@crypt-test:/# suicideCrypt -c /usr/local/share/containers/ -m /tmp/paranoid -s 2g -p -y 
+
+If you wish to see the steps of the creation process use "-v" for verbose.
+
+**Volume Management**
+
+You can quickly list all volumes currently created and mounted by suicide crypt using the *"-l"* option::
+
+    root@crypt-test:/# suicideCrypt -l
+
+    1: /dev/mapper/suicideCrypt_052219de-1863-43ed-9206-91f4ff4ff4a6 on /mnt
+    2: /dev/mapper/suicideCrypt_f4eb961b-a19e-4b12-8440-4d5bd9257848 on /tmp/paranoid
+
+    root@crypt-test:/# 
+
+We can perform a variety of actions on these disks such as:
+
+* -d destroy
+* -D destroy all
+* -u unmount
+* -U unmount all
+
+If you provide *"-d"* or *"-u"* with either the mapper path or the mount path as seen in the output of *"-l"* it will immediatly destroy or unmount that volume. If you do not specify a volume it will show you the list and prompt you to select a drive from the list::
+
+    root@crypt-test:/# suicideCrypt -d
+
+    No volume specified, Please choose which mounted volume to destroy from this list:
+
+    1: /dev/mapper/suicideCrypt_052219de-1863-43ed-9206-91f4ff4ff4a6 on /mnt
+    2: /dev/mapper/suicideCrypt_f4eb961b-a19e-4b12-8440-4d5bd9257848 on /tmp/paranoid
+
+    Enter number of volume you wish to destroy: 
+    
+***Please remember* that if you destroy a suicidecrypt contaner or block device is *cannot* be recovered via any method known to me. Be sure you wish to do this before selecting this option. **
+
+If you chose to destroy a container based volume you will be prompted if you want to clean up the container file at the same time (it's now useless) you can call suicidecrypt with *"-y"* to automatically do this. 
 
