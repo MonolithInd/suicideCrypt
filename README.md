@@ -282,8 +282,8 @@ So a service set default action will override the global, but if a particular vo
 
 In this way you can unmount by default; but if, for example, the system detects a RAM chill event and suspects someone is trying to extract your AES key, it can immediatly destroy all drives by prefrence. 
 
-**5.2.1 Plugins **
-
+5.2.1 Plugins
+-------------
 Suicidecryptd supports plugins to react to arbitrary external events. This can be used to trigger based on output from other IDS systems (tripwire etc) or from say, a post to a particular twitter feed. The recipt of a text message, phase of the moon or days ending in "y".
 
 Plugins must reside in:
