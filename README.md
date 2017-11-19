@@ -170,3 +170,29 @@ If you provide *"-d"* or *"-u"* with either the mapper path or the mount path as
 
 If you chose to destroy a container based volume you will be prompted if you want to clean up the container file at the same time (it's now useless) you can call suicidecrypt with *"-y"* to automatically do this. 
 
+Unmount performs similar actions to destroy in that it unmounts the volume mount and secure closes the cryptographic mapper interface, however it doesn't delete the LUKS header or keyfiles from the ramdisk /tmp/suicideCryptRAMdisk mount. If you have left these here the drive will be remountable until such time as the server is power cycled at which point **these files will be lost foever**.
+
+If you wish to be able to remount a sucideCrypt disk past a power cycle the two files that match the UUID of the suicideCrypt device or container *must* be copied to some external media. **DO NOT** write these file to the spinning disk or SSD of the server itself. Doing so invalidates all security of the volumed in question. 
+
+To remount a dismounted (not destroyed) suicideCrypt volume you can use the *"-a"* attach option. This requires 3 things:
+
+* that the header file and keyfile for this volume are in /tmp/suicideCryptRAMdisk
+* the container or volume you wish to remount.
+* a mointpoint to mount the volume on.
+
+Example:::
+
+    root@crypt-test:/# suicideCrypt -a /dev/sdb -m /mnt
+    Sucessfully attached /dev/sdb on /mnt
+    root@crypt-test:/# 
+
+If you have moved the header and keyfile off the server and rebooted since it was mounted, you will need to create the initial ramdisk using *"-i"* and copy the correct header and keyfiles to this location for *"-a"* to work. Each header and keyfile is tagged with the UUID of the cryptographic volume. If you're not sure which key and header go with this volume you can get the UUID from the file or block device using:::
+
+    root@crypt-test:/# cryptsetup luksUUID /dev/sdb
+    052219de-1863-43ed-9206-91f4ff4ff4a6
+    root@crypt-test:/# 
+    
+suicideCryptd
+-------------
+
+This is the daemon to monitor and manage cryptographic volumes. It works best with volumes created by the suicideCrypt wrapper (automatic detection etc) but will work with any linux based cryptographic volumes with some configuration. 
