@@ -302,7 +302,7 @@ If there is an alert it must print the name of the alert, the trigger level that
 
     pi-temp;15;CPU temp 10 has dropped below 15
     
-Please be careful with your suicideCryptd commands. If you are adding a new destroy check to the system first test it on a system with no important data. I wish to stress again that any volumes destroyed with suicidecryptd are **unrecoverable** and all data will be lost. 
+Please be careful with your suicideCryptd commands. If you are adding a new "destroy check" to the system first test it on a system with no important data. I wish to stress again that any volumes destroyed with suicidecryptd are **unrecoverable** and all data will be lost. 
 
 # 6.0 Disclaimer
 
