@@ -15,7 +15,7 @@ my $conf = Config::General->new(
          -ConfigFile => "/etc/suicideCrypt/suicideCryptd.conf",
 );
 my $VERSION = 1.0;
-my $DAEMON = 1;
+my $DAEMON = 0;
 my $DEBUG = 0;
 my %configH = $conf->getall;
 my $VERBOSE = $configH{verbose};
@@ -97,6 +97,9 @@ if ($configH{systemevents}{sensors}{enabled}) {
   );
 }
 
+
+# start a POE session or each of the plugins found linked in /etc/suicideCrypt/plugins 
+# monitor the plugin and wait for an alaem response. 
 foreach $plugin (@PLUGINS) {
 
   my $pluginName = (split('/', $plugin))[-1]  ;
@@ -110,9 +113,14 @@ foreach $plugin (@PLUGINS) {
       },
       tick => sub {
         my $response = `$plugin`;
-	if ($response ne "OK") {
+	my @data;
+	@data = split(';', $response);
+	if ($data[0] ne "OK") {
           $ALERTS{$pluginName}{alert} = 1;
-          $ALERTS{$pluginName}{message} = "Hey there! ";
+	  $ALERTS{$pluginName}{value} = $data[1];
+          if (defined $data[2]) {
+            $ALERTS{$pluginName}{message} = "$data[2]";
+          }
         }
 #	print "$response\n";
 
@@ -141,19 +149,16 @@ POE::Session->create(
         if ($ALERTS{$key}{alert}) {
           # why would we alert with no volumes being monitored?
           if (%VOLUMES) { 
-            print "\n\n*\\ Alert!\n" if $VERBOSE;
-            if ($key =~ /temp/) {
-              print "**\\------> We have detected a potential RAM chill event from lm-sensors: $key!\n" if $VERBOSE;
-            } elsif ($key =~ /udev/) {
-	            print "**\\------> We have detected a UDEV hardware change event $key!\n" if $VERBOSE;
-            } elsif ($key =~ /ossec/) {
-              print "**\\------> We have detected a ossec alert event $key!\n" if $VERBOSE;
-            } elsif ($key =~ /auth/) { 
-              print "**\\------> We have detected an auth log alert event $key!\n" if $VERBOSE;
-            } else {
-              print "**\\------> We have detected a plugin alert event from $key!\n" if $VERBOSE;
+            if ($VERBOSE) {
+              print "\n\n*\\ Alert!\n";
+	      print "**\\------> ";
+              if (defined $ALERTS{$key}{message}) {
+                print "$ALERTS{$key}{message}";
+              } else {
+                print "Alert detected from $key, no reason given, reacting\n";
+              }
+              print "\n" if $VERBOSE;
             }
-            print "\n" if $VERBOSE;
             alertReact();
             # reset the alert; 
           }
@@ -272,6 +277,7 @@ sub ossec_got_record {
   if ($log_record =~ m/level (\d+)/ ) {
     if ($1 >= 11) {
       $ALERTS{ossec}{alert} = 1;
+      $ALERTS{ossec}{message} = "We have detected a ossec alert event! Intrusion alarm level greater than 11\n"
     }
   }
   return;
@@ -300,6 +306,7 @@ sub auth_got_record {
     } else { 
       # non allowed user logged in! Panic!
       $ALERTS{auth}{alert} = 1;
+      $ALERTS{auth}{message} = "We have detected an auth log alert event for user $user!\n"
     }
   }
   return;
@@ -382,19 +389,22 @@ sub processUDEV {
     if ($configH{systemevents}{udevadm}{devices}{usb}) {
       print "--> USB State change!\n" if $DEBUG;
       $ALERTS{udevadm}{alert} = 1;
+      $ALERTS{udevadm}{message} = "We have detected a UDEV hardware change event for USB state change";
     }
   } elsif ($message[4] eq "(hid)") {
     if ($configH{systemevents}{udevadm}{devices}{keyboardmouse}) {
       print "--> Keyboard or Mouse state change detected!\n" if $DEBUG;
       $ALERTS{udevadm}{alert} = 1;
+      $ALERTS{udevadm}{message} = "We have detected a UDEV hardware change event for keyboard or mouse state change";
     }
   } elsif ($message[4] eq "(drm)") {
     if ($configH{systemevents}{udevadm}{devices}{monitor}) {
       print "--> Potential Monitor state change detected!\n" if $DEBUG;
       $ALERTS{udevadm}{alert} = 1;
+      $ALERTS{udevadm}{message} = "We have detected a UDEV hardware change event for monitor state change";
     }
    # Not really wise at this point to put this in until can tree UDEV devices, otherwise
-   # we detect a suicideCrypt drive creation as an alert and delete it. FAIL.
+   # we detect a suicideCrypt drive creation as an alert and delete it. FAIL!
 #  } elsif ($message[4] eq "(block)" || $message[4] eq "(scsi)") {
 #    if ($configH{systemevents}{udevadm}{devices}{disk}) {
 #      print "Potential Hard disk or USB Disk state change detected!\n" if $DEBUG;
