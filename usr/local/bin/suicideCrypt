@@ -1079,7 +1079,8 @@ sub printHelp {
   print "  -U : unmount ALL detectable suicideCrypt volumes on this host.\n";
   print "  -i : Initialise a suicideCrypt ramdisk, used to remount an exsisting sucidecrypt volume\n";
   print "  -a <container or block device to attach> : remount an existing unmounted suicideCrypt drive.\n";
-  print "  -p : default to paranoid mode in all volume creations. (see manpage for paranoid mode\n";
+  print "Options:\n";
+  print "  -p : default to paranoid mode in all volume creations. (see manpage for paranoid mode)\n";
   print "  -r : Use /dev/random instead of /dev/urandom for all random number collection.\n";
   print "  -y : assume \"yes\" to all destroy/create confirmations.\n";
   print "  -v : verbose, display more detail on execution.\n";
@@ -1149,5 +1150,34 @@ sub logClose {
   close $LOG;
 
 }
+
+=head1 NAME
+
+suicideCrypt  - A tool for creating and monitoring secure cryptographic volumes.
+
+=head1 DESCRIPTION
+
+A tool for creating cryptographically strong volumes that destroy themselves 
+upon tampering or via issued command. Included is a daemon designed to react 
+to system events and on a configurable basis, destroy data volumes encrypted 
+using the suicideCrypt tool. This process is fast and, if used correctly, both 
+unrecoverable by an adversary and auditably unrecoverable by the volume owner.
+
+=head1 VERSION
+
+Version 1.0
+
+=head1 AUTHOR
+
+Sebastian Kai Frost, C<< <sebastian.kai.frost at gmail.com> >>
+
+=head1 LICENSE AND COPYRIGHT
+
+Copyright 2017 Sebastian kai Frost.
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of the GPL3 license.
+
+=cut
 
 ### EOF ###
