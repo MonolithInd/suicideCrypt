@@ -1,3 +1,5 @@
+Please note this is demonstrator software only. The main program currently acts as a "sanitising" wrapper around cryptsetup and is NOT pretty code. The daemon is implimented in perl and will be re-written into C# in the near future to be "production robust"
+
 # 1.0 suicideCrypt
 A tool for creating cryptographically strong volumes that destroy themselves upon tampering or via issued command. Included is a daemon designed to react to system events and on a configurable basis, destroy data volumes encrypted using the suicideCrypt tool. This process is fast and, if used correctly, both unrecoverable by an adversary and auditably unrecoverable by the volume owner. 
 
